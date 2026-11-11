@@ -69,6 +69,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var idCardCaptureStage by mutableStateOf(0)
         private set
     private var idCardFrontPage: ScanPage? = null
+    /** True after the front side is captured, until the user taps "Scan back side". */
+    var idCardAwaitingBack by mutableStateOf(false)
+        private set
+    var idCardFrontPreview by mutableStateOf<ImageBitmap?>(null)
+        private set
     var busy by mutableStateOf<String?>(null)
     var message by mutableStateOf<String?>(null)
     var exportResult by mutableStateOf<ExportResult?>(null)
@@ -114,13 +119,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         idCardFrontPage?.file?.delete()
         idCardFrontPage = null
         idCardCaptureStage = 0
+        idCardAwaitingBack = false
+        idCardFrontPreview = null
     }
+
+    /** The user confirmed the front side and is ready to show the back side. */
+    fun beginBackCapture() { idCardAwaitingBack = false }
 
     fun retakeIdCardFront() {
         if (idCardCaptureStage != 2) return
         idCardFrontPage?.file?.delete()
         idCardFrontPage = null
         idCardCaptureStage = 1
+        idCardAwaitingBack = false
+        idCardFrontPreview = null
         message = "Please capture the front side again."
     }
 
@@ -167,10 +179,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (idCardCaptureStage == 1) {
                 idCardFrontPage = page
                 idCardCaptureStage = 2
+                idCardFrontPreview = withContext(Dispatchers.Default) { renderFrontPreview(page) }
+                idCardAwaitingBack = true   // wait here until the user taps "Scan back side"
                 busy = null
-                if (stack.last() == Screen.CAMERA) stack.removeAt(stack.lastIndex)
-                navigate(Screen.CAMERA)
-                message = "Front side captured. Now scan the back side."
                 return@launch
             }
 
@@ -270,6 +281,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             frontCrop?.recycle()
             backCrop?.recycle()
             sheet?.recycle()
+        }
+    }
+
+    /** Small corrected preview of the captured front side so the user can check it. */
+    private fun renderFrontPreview(page: ScanPage): ImageBitmap? {
+        val src = ImageIO.decodeFile(page.file, 1400) ?: return null
+        return try {
+            val s = ProcessSettings(filter = ScanFilter.ENHANCED, sharpness = 0.12f, autoStraighten = false)
+            ImageProcessor.render(src, page.corners, s, 700, IdCardLayout.CARD_ASPECT).asImageBitmap()
+        } catch (e: Exception) {
+            null
+        } finally {
+            src.recycle()
         }
     }
 

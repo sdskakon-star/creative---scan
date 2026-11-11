@@ -20,8 +20,8 @@ android {
         applicationId = "com.kowsiq.creativescan"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.1.1"
         // Android phones use ARM ABIs. Exclude x86_64 emulator binaries from phone APKs;
         // this removes a large OpenCV native library without affecting ARM phones.
         ndk {
@@ -30,6 +30,14 @@ android {
     }
 
     signingConfigs {
+        // Fixed debug key (committed on purpose, debug builds only). GitHub creates a random debug
+        // key for every build, which makes Android reject updates over an installed version.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (keystoreProps.containsKey("storeFile")) {
             create("release") {
                 storeFile = rootProject.file(keystoreProps["storeFile"] as String)

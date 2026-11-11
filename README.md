@@ -80,6 +80,14 @@ Android 8–9 asks for the storage permission once.
 - Interrupted scans are restored after the app is closed.
 - Not included: folders (marked "if practical" in the brief).
 
+## Version 1.1.1 changes
+
+- ID Card Scan: after the front side the camera now stops and shows a preview with **Scan back side** / **Retake front**; auto-capture
+  needs 12 steady frames and a 2 s cool-down, so the back side can no longer be captured immediately.
+- Fixed debug signing key (`app/debug.keystore`) so a new build installs over the previous one. Builds up to v1.1.0 used random
+  per-build keys: uninstall those once, later updates install normally.
+- About screen shows the real app version.
+
 ## Version 1.1.0 changes
 
 - Added dedicated **ID Card Scan** on the home screen.

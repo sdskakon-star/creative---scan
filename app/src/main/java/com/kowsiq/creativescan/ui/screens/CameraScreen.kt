@@ -20,6 +20,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -70,6 +72,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
@@ -85,10 +88,13 @@ import kotlinx.coroutines.delay
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.hypot
 import kotlin.math.max
 
 private const val READY_FRAMES = 8
+private const val CARD_READY_FRAMES = 12   // ID cards need a longer steady period
+private const val CARD_COOLDOWN_MS = 2000L // pause before auto-capture can fire for a card side
 
 @Composable
 fun CameraScreen(vm: AppViewModel) {
@@ -117,6 +123,8 @@ fun CameraScreen(vm: AppViewModel) {
     val capturing = remember { AtomicBoolean(false) }
     val autoCapture = rememberUpdatedState(vm.settings.autoCapture)
     val cardCaptureStage = rememberUpdatedState(vm.idCardCaptureStage)
+    val awaitingBack = rememberUpdatedState(vm.idCardAwaitingBack)
+    val resumeAt = remember { AtomicLong(0L) }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
 
     fun takePhoto() {
@@ -188,14 +196,16 @@ fun CameraScreen(vm: AppViewModel) {
 
                             val c = res.corners
                             val prev = lastCorners
-                            steady = if (c != null && prev != null && movement(c, prev) < 0.02f) steady + 1 else 0
+                            val blocked = awaitingBack.value || System.currentTimeMillis() < resumeAt.get()
+                            steady = if (!blocked && c != null && prev != null && movement(c, prev) < 0.02f) steady + 1 else 0
                             lastCorners = c
                             live = res
                             stable = steady
 
                             val minReadyArea = if (cardCaptureStage.value > 0) 0.10 else 0.25
                             val acceptableLighting = !res.shadowy || cardCaptureStage.value > 0
-                            if (c != null && steady >= READY_FRAMES && res.areaFraction > minReadyArea &&
+                            val needFrames = if (cardCaptureStage.value > 0) CARD_READY_FRAMES else READY_FRAMES
+                            if (!blocked && c != null && steady >= needFrames && res.areaFraction > minReadyArea &&
                                 acceptableLighting && autoCapture.value
                             ) {
                                 mainExecutor.execute { takePhotoState.value() }
@@ -225,10 +235,12 @@ fun CameraScreen(vm: AppViewModel) {
     }
 
     LaunchedEffect(torch, camera) { camera?.cameraControl?.enableTorch(torch) }
-    LaunchedEffect(vm.idCardCaptureStage) {
-        // Do not carry the front-side stability counter into the back-side capture.
+    LaunchedEffect(vm.idCardCaptureStage, vm.idCardAwaitingBack) {
+        // Do not carry the front-side stability counter into the back-side capture, and give the
+        // user time to flip the card before auto-capture may fire again.
         stable = 0
         live = null
+        resumeAt.set(System.currentTimeMillis() + CARD_COOLDOWN_MS)
     }
     LaunchedEffect(focusPoint) {
         if (focusPoint != null) {
@@ -239,16 +251,17 @@ fun CameraScreen(vm: AppViewModel) {
 
     val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
     val l = live
+    val readyFrames = if (vm.idCardCaptureStage > 0) CARD_READY_FRAMES else READY_FRAMES
     val guidance = if (vm.idCardCaptureStage == 1) {
         when {
             l?.corners == null -> "Place the FRONT of the card flat inside the frame."
-            stable >= READY_FRAMES -> "Front side ready — hold still."
+            stable >= readyFrames -> "Front side ready — hold still."
             else -> "Front side detected — keep the full card visible."
         }
     } else if (vm.idCardCaptureStage == 2) {
         when {
             l?.corners == null -> "Now place the BACK of the card flat inside the frame."
-            stable >= READY_FRAMES -> "Back side ready — hold still."
+            stable >= readyFrames -> "Back side ready — hold still."
             else -> "Back side detected — keep the full card visible."
         }
     } else when {
@@ -260,7 +273,7 @@ fun CameraScreen(vm: AppViewModel) {
         else -> "Document detected."
     }
     val readyArea = if (vm.idCardCaptureStage > 0) 0.10 else 0.25
-    val ready = l?.corners != null && stable >= READY_FRAMES && l.areaFraction > readyArea && !l.shadowy
+    val ready = l?.corners != null && stable >= readyFrames && l.areaFraction > readyArea && !l.shadowy
 
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         Row(
@@ -349,13 +362,44 @@ fun CameraScreen(vm: AppViewModel) {
                             drawCircle(Color.White, radius = 32.dp.toPx(), center = it, style = Stroke(2.dp.toPx()))
                         }
                     }
-                    Text(
-                        guidance,
-                        color = Color.White,
-                        modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
-                            .clip(RoundedCornerShape(50)).background(Color(0x99000000))
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+                    if (!vm.idCardAwaitingBack) {
+                        Text(
+                            guidance,
+                            color = Color.White,
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp)
+                                .clip(RoundedCornerShape(50)).background(Color(0x99000000))
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                    if (vm.idCardAwaitingBack) {
+                        Column(
+                            Modifier.fillMaxSize().background(Color(0xE6000000)).padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text("Front side captured ✓", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                            vm.idCardFrontPreview?.let {
+                                Spacer(Modifier.height(12.dp))
+                                Image(
+                                    it, "Front side preview",
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)),
+                                    contentScale = ContentScale.FillWidth
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                "Now turn the card over and place the BACK side flat inside the frame, then tap the button below.",
+                                color = Color.White
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Button(onClick = { vm.beginBackCapture() }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Scan back side")
+                            }
+                            OutlinedButton(onClick = { vm.retakeIdCardFront() }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Retake front", color = Color.White)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -391,7 +435,7 @@ fun CameraScreen(vm: AppViewModel) {
                     Modifier.size(76.dp).clip(CircleShape).border(4.dp, Color.White, CircleShape)
                         .padding(7.dp).clip(CircleShape)
                         .background(if (ready) Cyan else Color.White)
-                        .clickable(enabled = hasPermission) { takePhoto() }
+                        .clickable(enabled = hasPermission && !vm.idCardAwaitingBack) { takePhoto() }
                 )
                 Box(Modifier.weight(1f))
             }

@@ -15,6 +15,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -106,7 +108,11 @@ fun AboutScreen(vm: AppViewModel) {
             Spacer(Modifier.height(4.dp))
             Text("Professional Document Scanner", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(20.dp))
-            Text("Version 1.0.0  ·  com.kowsiq.creativescan", fontSize = 12.sp,
+            val ctx = LocalContext.current
+            val version = remember {
+                runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: ""
+            }
+            Text("Version $version  ·  com.kowsiq.creativescan", fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(20.dp))
             Text(
