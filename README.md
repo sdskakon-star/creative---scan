@@ -89,7 +89,12 @@ Android 8–9 asks for the storage permission once.
 - Explicitly release OpenCV contour, hierarchy, kernel, polygon, and perspective-transform Mats to reduce native-memory growth during repeated scanning.
 - Excluded x86_64 OpenCV binaries from phone APKs; ARM64 and ARM32 phone support remains.
 
-**Build verification:** source changes are prepared, but this environment does not include the Android SDK/Gradle build environment. Run the GitHub Actions `Build APK` workflow or build with Android Studio before installing the updated APK.
+**Build verification:** every push runs two GitHub Actions workflows. *Build APK* runs `gradle assembleDebug` and publishes
+`CreativeScan-debug.apk` as a GitHub Release. *Unit tests* runs JVM tests for the ID-card A4 layout (both cards centred, ISO ID-1
+size at 200 dpi) and for the PDF writer (valid structure, page order, edge-to-edge A4 card page, rotation). Camera capture,
+OpenCV detection and on-device JPEG/PDF export are not covered by automated tests; check them on a real phone.
+
+Portrait-held ID cards are not stretched: they are corrected at their own aspect ratio and then rotated to landscape.
 
 ## Project layout
 
