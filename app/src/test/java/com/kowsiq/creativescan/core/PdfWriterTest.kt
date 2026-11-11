@@ -1,25 +1,22 @@
 package com.kowsiq.creativescan.core
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import java.awt.image.BufferedImage
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import javax.imageio.ImageIO
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 
 class PdfWriterTest {
 
-    private fun jpeg(w: Int, h: Int, rgb: Int): PdfImage = jpeg(w, h, rgb, false)
-
-    private fun jpeg(w: Int, h: Int, rgb: Int, fullA4: Boolean): PdfImage {
-        val img = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
-        for (y in 0 until h) for (x in 0 until w) img.setRGB(x, y, rgb)
-        val out = ByteArrayOutputStream()
-        assertTrue(ImageIO.write(img, "jpg", out))
-        return PdfImage(out.toByteArray(), w, h, fullA4)
+    /** Stand-in JPEG payload (SOI ... EOI). The writer only embeds the bytes, it never decodes them. */
+    private fun payload(tag: Int, size: Int = 64): ByteArray {
+        val b = ByteArray(size) { ((tag * 31 + it) and 0x7F).toByte() }
+        b[0] = 0xFF.toByte(); b[1] = 0xD8.toByte()
+        b[size - 2] = 0xFF.toByte(); b[size - 1] = 0xD9.toByte()
+        return b
     }
+
+    private fun jpeg(w: Int, h: Int, tag: Int, fullA4: Boolean = false) = PdfImage(payload(tag), w, h, fullA4)
 
     private fun write(pages: List<PdfImage>, fit: Boolean, dpi: Int = 300): ByteArray {
         val out = ByteArrayOutputStream()
@@ -31,7 +28,7 @@ class PdfWriterTest {
 
     @Test
     fun structureAndXrefAreValid() {
-        val pdf = write(listOf(jpeg(100, 140, 0xFF0000), jpeg(140, 100, 0x00FF00)), fit = true)
+        val pdf = write(listOf(jpeg(100, 140, 1), jpeg(140, 100, 2)), fit = true)
         val t = text(pdf)
         assertTrue(t.startsWith("%PDF-1.4"))
         assertTrue(t.trimEnd().endsWith("%%EOF"))
@@ -46,34 +43,36 @@ class PdfWriterTest {
     }
 
     @Test
-    fun embeddedJpegStreamsDecodeAndKeepOrder() {
-        val red = 0xFF0000; val green = 0x00FF00
-        val pdf = write(listOf(jpeg(64, 64, red), jpeg(64, 64, green)), fit = true)
+    fun embeddedJpegStreamsAreIntactAndInPageOrder() {
+        val p1 = payload(1, 80); val p2 = payload(2, 96); val p3 = payload(3, 72)
+        val pdf = write(
+            listOf(PdfImage(p1, 10, 10), PdfImage(p2, 10, 10), PdfImage(p3, 10, 10)), fit = true
+        )
         val t = text(pdf)
-        val streams = Regex("/Filter /DCTDecode /Length (\\d+) >>\\nstream\\n").findAll(t).toList()
-        assertEquals(2, streams.size)
-        val colours = streams.map { m ->
+        val streams = Regex("/Filter /DCTDecode /Length (\\d+) >>\nstream\n").findAll(t).toList()
+        assertEquals(3, streams.size)
+        val expected = listOf(p1, p2, p3)
+        streams.forEachIndexed { i, m ->
             val len = m.groupValues[1].toInt()
+            assertEquals(expected[i].size, len)
             val start = m.range.last + 1
-            val decoded = ImageIO.read(ByteArrayInputStream(pdf, start, len))
-            assertNotNull(decoded)
-            decoded.getRGB(32, 32) and 0xFFFFFF
+            assertArrayEquals("page ${i + 1} bytes", expected[i], pdf.copyOfRange(start, start + len))
+            assertTrue(t.startsWith("\nendstream", start + len))
         }
-        // page 1 is predominantly red, page 2 predominantly green (JPEG is lossy)
-        assertTrue((colours[0] shr 16) > 200 && (colours[0] and 0xFF) < 60)
-        assertTrue(((colours[1] shr 8) and 0xFF) > 200 && (colours[1] shr 16) < 60)
+        // Page tree lists the pages in the same order as the image objects
+        assertTrue(t.contains("/Kids [3 0 R 6 0 R 9 0 R] /Count 3"))
     }
 
     @Test
     fun fullA4IdCardPageIsEdgeToEdgeOnA4Portrait() {
-        val pdf = text(write(listOf(jpeg(165, 234, 0xFFFFFF, true)), fit = true))
+        val pdf = text(write(listOf(jpeg(165, 234, 4, true)), fit = true))
         assertTrue(pdf.contains("/MediaBox [0 0 595.28 841.89]"))
         assertTrue(pdf.contains("q 595.28 0 0 841.89 0.00 0.00 cm /Im0 Do Q"))
     }
 
     @Test
     fun fullA4IdCardPageKeepsLandscapeWhenRotated() {
-        val pdf = text(write(listOf(jpeg(234, 165, 0xFFFFFF, true)), fit = true))
+        val pdf = text(write(listOf(jpeg(234, 165, 4, true)), fit = true))
         assertTrue(pdf.contains("/MediaBox [0 0 841.89 595.28]"))
         assertTrue(pdf.contains("q 841.89 0 0 595.28 0.00 0.00 cm /Im0 Do Q"))
     }
@@ -81,7 +80,7 @@ class PdfWriterTest {
     @Test
     fun regularFitToPageIsCentredInsideMargins() {
         // square image on A4 portrait: limited by the width, centred vertically
-        val pdf = text(write(listOf(jpeg(100, 100, 0x808080)), fit = true))
+        val pdf = text(write(listOf(jpeg(100, 100, 5)), fit = true))
         assertTrue(pdf.contains("/MediaBox [0 0 595.28 841.89]"))
         val m = Regex("q ([\\d.]+) 0 0 ([\\d.]+) ([\\d.]+) ([\\d.]+) cm").find(pdf)!!
         val (dw, dh, x, y) = m.groupValues.drop(1).map { it.toDouble() }
@@ -93,7 +92,7 @@ class PdfWriterTest {
 
     @Test
     fun nativeSizeModeUsesImageDpi() {
-        val pdf = text(write(listOf(jpeg(300, 600, 0xFFFFFF)), fit = false, dpi = 300))
+        val pdf = text(write(listOf(jpeg(300, 600, 6)), fit = false, dpi = 300))
         assertTrue(pdf.contains("/MediaBox [0 0 72.00 144.00]"))
     }
 }
