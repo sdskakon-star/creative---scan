@@ -66,18 +66,30 @@ Android 8–9 asks for the storage permission once.
 
 - CameraX preview, live edge detection overlay, guidance messages, auto-capture when steady, manual shutter,
   flashlight, tap-to-focus, focus button, zoom slider, permission handling.
-- OpenCV document detection (Canny + Otsu contours, 4-corner quad), perspective correction, auto-straighten.
+- OpenCV document detection (Canny + Otsu contours, 4-corner quad), perspective correction, auto-straighten. Detection contour/mask Mats and warp point matrices are explicitly released to reduce native-memory growth during long camera sessions.
 - Manual 4-corner adjustment with magnifier, auto-detect and full-image buttons.
 - Filters: Original Color, Enhanced Color, Grayscale, Black & White, Document Clean, Photo Mode
   (illumination normalisation, CLAHE, white balance, bilateral denoise, adaptive threshold, unsharp mask).
   Brightness / contrast / sharpness, rotate, before/after, revert to original. Original capture is never modified.
 - Multi-page: add, retake, delete, reorder, rotate, per-page filter, apply filter to all, thumbnails, page numbers.
+- Two-sided ID card copy: capture front and back separately, with a front-side retake option while capturing the back. Each side is detected and perspective-corrected to standard ID-1 dimensions (85.60 × 53.98 mm), then both are centred horizontally and vertically as a pair on one white A4 portrait page (200 dpi). PDF export preserves the exact A4 page size and physical card dimensions; review the composed page before exporting PDF/JPEG.
 - PDF export (own writer, JPEG streams): A4 auto portrait/landscape, fit-to-page with margins or native size,
   Standard (150 dpi, q75) / High Quality (up to 300 dpi, q92). Images are never upscaled.
 - JPEG export: quality 60–100 (default 95), optional original copy, custom file name.
 - Documents: thumbnails, search, sort by date/name, rename, delete, open, share, recent scans.
 - Interrupted scans are restored after the app is closed.
 - Not included: folders (marked "if practical" in the brief).
+
+## Version 1.1.0 changes
+
+- Added dedicated **ID Card Scan** on the home screen.
+- Guided front-side then back-side capture, with an option to retake the front before capturing the back.
+- Added a fixed ID-1 aspect-ratio perspective correction path and A4 two-sided card-copy composition.
+- PDF writer now places a pre-composed A4 card-copy raster edge-to-edge on an A4 PDF page, avoiding an unintended second margin that would shrink the physical card size.
+- Explicitly release OpenCV contour, hierarchy, kernel, polygon, and perspective-transform Mats to reduce native-memory growth during repeated scanning.
+- Excluded x86_64 OpenCV binaries from phone APKs; ARM64 and ARM32 phone support remains.
+
+**Build verification:** source changes are prepared, but this environment does not include the Android SDK/Gradle build environment. Run the GitHub Actions `Build APK` workflow or build with Android Studio before installing the updated APK.
 
 ## Project layout
 

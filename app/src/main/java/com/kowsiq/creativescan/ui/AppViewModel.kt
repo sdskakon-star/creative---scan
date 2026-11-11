@@ -3,6 +3,10 @@ package com.kowsiq.creativescan.ui
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.util.LruCache
@@ -16,6 +20,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kowsiq.creativescan.core.ImageIO
+import com.kowsiq.creativescan.core.IdCardLayout
 import com.kowsiq.creativescan.core.ImageProcessor
 import com.kowsiq.creativescan.core.NPoint
 import com.kowsiq.creativescan.core.PdfImage
@@ -60,6 +65,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val thumbs = mutableStateMapOf<String, ImageBitmap>()
     var editIndex by mutableStateOf(-1)
     var retakeIndex by mutableStateOf(-1)
+    /** 0 = regular scan, 1 = capture card front, 2 = capture card back. */
+    var idCardCaptureStage by mutableStateOf(0)
+        private set
+    private var idCardFrontPage: ScanPage? = null
     var busy by mutableStateOf<String?>(null)
     var message by mutableStateOf<String?>(null)
     var exportResult by mutableStateOf<ExportResult?>(null)
@@ -78,12 +87,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- navigation ----------
     fun navigate(s: Screen) { stack.add(s) }
-    fun pop() { if (stack.size > 1) stack.removeAt(stack.lastIndex) }
+    fun pop() {
+        if (stack.size > 1) {
+            if (stack.last() == Screen.CAMERA && idCardCaptureStage > 0) cancelIdCardScan()
+            stack.removeAt(stack.lastIndex)
+        }
+    }
 
     fun startScan() {
+        cancelIdCardScan()
         clearSession()
         retakeIndex = -1
         navigate(Screen.CAMERA)
+    }
+
+    /** Starts a guided two-sided ID-1 card copy, then places both sides on one A4 page. */
+    fun startIdCardScan() {
+        cancelIdCardScan()
+        clearSession()
+        retakeIndex = -1
+        idCardCaptureStage = 1
+        navigate(Screen.CAMERA)
+    }
+
+    private fun cancelIdCardScan() {
+        idCardFrontPage?.file?.delete()
+        idCardFrontPage = null
+        idCardCaptureStage = 0
+    }
+
+    fun retakeIdCardFront() {
+        if (idCardCaptureStage != 2) return
+        idCardFrontPage?.file?.delete()
+        idCardFrontPage = null
+        idCardCaptureStage = 1
+        message = "Please capture the front side again."
     }
 
     fun addPage() { retakeIndex = -1; navigate(Screen.CAMERA) }
@@ -106,16 +144,144 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- capture / import ----------
     fun onPhotoCaptured(file: File) {
         viewModelScope.launch {
-            busy = "Processing capture…"
-            val page = withContext(Dispatchers.Default) { createPage(Uri.fromFile(file)) }
+            busy = if (idCardCaptureStage > 0) "Processing card side…" else "Processing capture…"
+            val isCardSide = idCardCaptureStage > 0
+            val page = withContext(Dispatchers.Default) {
+                createPage(
+                    Uri.fromFile(file),
+                    minAreaFraction = if (isCardSide) 0.06 else 0.15,
+                    requireDetection = isCardSide
+                )
+            }
             file.delete()
+            if (page == null) {
+                busy = null
+                message = if (isCardSide) {
+                    "Could not detect all four card edges. Place the card flat on a darker, plain surface and try again."
+                } else {
+                    "Could not read the captured image. Please try again."
+                }
+                return@launch
+            }
+
+            if (idCardCaptureStage == 1) {
+                idCardFrontPage = page
+                idCardCaptureStage = 2
+                busy = null
+                if (stack.last() == Screen.CAMERA) stack.removeAt(stack.lastIndex)
+                navigate(Screen.CAMERA)
+                message = "Front side captured. Now scan the back side."
+                return@launch
+            }
+
+            if (idCardCaptureStage == 2) {
+                val front = idCardFrontPage
+                if (front == null) {
+                    page.file.delete()
+                    idCardCaptureStage = 1
+                    busy = null
+                    message = "Front side is missing. Please scan the front again."
+                    return@launch
+                }
+                val a4Page = withContext(Dispatchers.Default) { composeIdCardA4Page(front, page) }
+                front.file.delete()
+                page.file.delete()
+                idCardFrontPage = null
+                idCardCaptureStage = 0
+                busy = null
+                if (a4Page == null) {
+                    message = "Could not create the A4 card copy. Please scan both sides again."
+                    if (stack.last() == Screen.CAMERA) stack.removeAt(stack.lastIndex)
+                    navigate(Screen.HOME)
+                    return@launch
+                }
+                placeCapturedPage(a4Page)
+                if (stack.last() == Screen.CAMERA) stack.removeAt(stack.lastIndex)
+                navigate(Screen.EDIT)
+                message = "Both sides placed on one A4 page. Review before saving."
+                return@launch
+            }
+
             busy = null
-            if (page == null) { message = "Could not read the captured image"; return@launch }
             placeCapturedPage(page)
-            // Leave the camera and show the editor.
             if (stack.last() == Screen.CAMERA) stack.removeAt(stack.lastIndex)
             if (stack.last() != Screen.EDIT) navigate(Screen.EDIT)
         }
+    }
+
+    /**
+     * Makes a true A4 portrait raster at 200 dpi. The two ID-1 sides are perspective-corrected
+     * separately, scaled to physical card size, centred horizontally and grouped vertically.
+     * The pair as a whole is centred on the sheet, with a white background and no watermark.
+     */
+    private fun composeIdCardA4Page(front: ScanPage, back: ScanPage): ScanPage? {
+        val frontSource = ImageIO.decodeFile(front.file, 4096) ?: return null
+        val backSource = ImageIO.decodeFile(back.file, 4096)
+        if (backSource == null) {
+            frontSource.recycle()
+            return null
+        }
+        var frontCrop: Bitmap? = null
+        var backCrop: Bitmap? = null
+        var sheet: Bitmap? = null
+        try {
+            val cardSettings = ProcessSettings(
+                filter = ScanFilter.ENHANCED,
+                brightness = 0f,
+                contrast = 1f,
+                sharpness = 0.12f,
+                autoStraighten = false
+            )
+            val frontImage0 = ImageProcessor.render(frontSource, front.corners, cardSettings, 1500, IdCardLayout.CARD_ASPECT)
+            frontCrop = frontImage0
+            val backImage0 = ImageProcessor.render(backSource, back.corners, cardSettings, 1500, IdCardLayout.CARD_ASPECT)
+            backCrop = backImage0
+
+            // Upright (portrait) cards are turned to landscape so both sides share one layout.
+            val frontImage = landscape(frontImage0).also { frontCrop = it }
+            val backImage = landscape(backImage0).also { backCrop = it }
+
+            val layout = IdCardLayout.compute()
+            val a4Bitmap = Bitmap.createBitmap(
+                IdCardLayout.PAGE_WIDTH.toInt(), IdCardLayout.PAGE_HEIGHT.toInt(), Bitmap.Config.ARGB_8888
+            )
+            sheet = a4Bitmap
+            a4Bitmap.eraseColor(Color.WHITE)
+            val canvas = Canvas(a4Bitmap)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+            canvas.drawBitmap(frontImage, null, layout.front.toRectF(), paint)
+            canvas.drawBitmap(backImage, null, layout.back.toRectF(), paint)
+
+            val id = UUID.randomUUID().toString()
+            val output = File(sessionDir, "$id.jpg")
+            ImageIO.saveJpeg(a4Bitmap, output, 98)
+            return ScanPage(
+                id = id,
+                file = output,
+                corners = ImageProcessor.defaultCorners(0f),
+                settings = ProcessSettings(filter = ScanFilter.ORIGINAL, sharpness = 0f, autoStraighten = false),
+                isIdCardCopy = true
+            )
+        } catch (e: Exception) {
+            return null
+        } finally {
+            frontSource.recycle()
+            backSource.recycle()
+            frontCrop?.recycle()
+            backCrop?.recycle()
+            sheet?.recycle()
+        }
+    }
+
+    private fun IdCardLayout.Box.toRectF() = RectF(left, top, right, bottom)
+
+    /** Returns [src] if landscape, otherwise a clockwise-rotated copy (the source is recycled). */
+    private fun landscape(src: Bitmap): Bitmap {
+        if (src.width >= src.height) return src
+        val m = Matrix().apply { postRotate(90f) }
+        val rotated = Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
+        if (rotated !== src) src.recycle()
+        return rotated
     }
 
     fun importUris(uris: List<Uri>) {
@@ -151,12 +317,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         persist()
     }
 
-    private fun createPage(uri: Uri): ScanPage? {
+    private fun createPage(
+        uri: Uri,
+        minAreaFraction: Double = 0.15,
+        requireDetection: Boolean = false
+    ): ScanPage? {
         val bmp = ImageIO.decodeUri(ctx, uri, 4096) ?: return null
+        val det = try {
+            ImageProcessor.analyzeFrame(bmp, minAreaFraction, true, 1000)
+        } catch (e: Exception) {
+            bmp.recycle()
+            return null
+        }
+        if (requireDetection && (det.corners == null || det.areaFraction < minAreaFraction)) {
+            bmp.recycle()
+            return null
+        }
         val id = UUID.randomUUID().toString()
         val f = File(sessionDir, "$id.jpg")
-        ImageIO.saveJpeg(bmp, f, 95)
-        val det = ImageProcessor.analyzeFrame(bmp, 0.15, true, 800)
+        ImageIO.saveJpeg(bmp, f, 97)
         bmp.recycle()
         return ScanPage(
             id = id,
@@ -249,6 +428,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     put("sharpness", p.settings.sharpness.toDouble())
                     put("auto", p.settings.autoStraighten)
                     put("rotation", p.settings.rotation)
+                    put("isIdCardCopy", p.isIdCardCopy)
                 })
             }
             File(sessionDir, "session.json").writeText(arr.toString())
@@ -276,7 +456,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     autoStraighten = o.getBoolean("auto"),
                     rotation = o.getInt("rotation")
                 )
-                val page = ScanPage(o.getString("id"), file, corners, s)
+                val page = ScanPage(o.getString("id"), file, corners, s, o.optBoolean("isIdCardCopy", false))
                 pages.add(page)
                 refreshThumb(page)
             }
@@ -357,7 +537,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         src.recycle()
         val baos = ByteArrayOutputStream()
         out.compress(Bitmap.CompressFormat.JPEG, quality, baos)
-        val img = PdfImage(baos.toByteArray(), out.width, out.height)
+        val img = PdfImage(baos.toByteArray(), out.width, out.height, page.isIdCardCopy)
         out.recycle()
         return img
     }

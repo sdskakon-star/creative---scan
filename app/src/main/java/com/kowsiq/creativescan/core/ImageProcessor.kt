@@ -60,7 +60,8 @@ object ImageProcessor {
         val result = if (quad == null) {
             LiveResult(null, 0.0, false)
         } else {
-            val area = Imgproc.contourArea(MatOfPoint(*quad.toTypedArray()))
+            val polygon = MatOfPoint(*quad.toTypedArray())
+            val area = try { Imgproc.contourArea(polygon) } finally { polygon.release() }
             LiveResult(
                 corners = quad.map { NPoint((it.x / w).toFloat(), (it.y / h).toFloat()) },
                 areaFraction = area / (w * h),
@@ -75,71 +76,114 @@ object ImageProcessor {
         val imgArea = gray.rows().toDouble() * gray.cols()
         val kernel3 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
         val kernel5 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
-
-        val mean = Core.mean(gray).`val`[0]
         val edges = Mat()
-        Imgproc.Canny(gray, edges, max(20.0, 0.66 * mean), min(255.0, max(60.0, 1.33 * mean)))
-        Imgproc.dilate(edges, edges, kernel3)
-        Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, kernel3, Point(-1.0, -1.0), 2)
-
         val otsu = Mat()
-        Imgproc.threshold(gray, otsu, 0.0, 255.0, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
-        Imgproc.morphologyEx(otsu, otsu, Imgproc.MORPH_CLOSE, kernel5)
-        Imgproc.morphologyEx(otsu, otsu, Imgproc.MORPH_OPEN, kernel5)
         val otsuInv = Mat()
-        Core.bitwise_not(otsu, otsuInv)
+        try {
+            val mean = Core.mean(gray).`val`[0]
+            Imgproc.Canny(gray, edges, max(20.0, 0.66 * mean), min(255.0, max(60.0, 1.33 * mean)))
+            Imgproc.dilate(edges, edges, kernel3)
+            Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, kernel3, Point(-1.0, -1.0), 2)
 
-        var best: List<Point>? = null
-        var bestArea = 0.0
-        for (mask in listOf(edges, otsu, otsuInv)) {
-            val contours = ArrayList<MatOfPoint>()
-            Imgproc.findContours(mask.clone(), contours, Mat(), Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
-            contours.sortByDescending { Imgproc.contourArea(it) }
-            for (cnt in contours.take(6)) {
-                val area = Imgproc.contourArea(cnt)
-                if (area < minFraction * imgArea) break
-                if (area > 0.99 * imgArea) continue
-                val c2f = MatOfPoint2f(*cnt.toArray())
-                val peri = Imgproc.arcLength(c2f, true)
-                val approx = MatOfPoint2f()
-                Imgproc.approxPolyDP(c2f, approx, 0.02 * peri, true)
-                val pts = approx.toArray()
-                if (pts.size == 4 && Imgproc.isContourConvex(MatOfPoint(*pts))) {
-                    val ordered = orderPoints(pts.toList())
-                    if (isPlausible(ordered) && area > bestArea) {
-                        best = ordered
-                        bestArea = area
+            Imgproc.threshold(gray, otsu, 0.0, 255.0, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
+            Imgproc.morphologyEx(otsu, otsu, Imgproc.MORPH_CLOSE, kernel5)
+            Imgproc.morphologyEx(otsu, otsu, Imgproc.MORPH_OPEN, kernel5)
+            Core.bitwise_not(otsu, otsuInv)
+
+            var best: List<Point>? = null
+            var bestArea = 0.0
+            for (mask in listOf(edges, otsu, otsuInv)) {
+                val contourInput = mask.clone()
+                val hierarchy = Mat()
+                val contours = ArrayList<MatOfPoint>()
+                try {
+                    Imgproc.findContours(contourInput, contours, hierarchy, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE)
+                    contours.sortByDescending { Imgproc.contourArea(it) }
+                    for (cnt in contours.take(8)) {
+                        val area = Imgproc.contourArea(cnt)
+                        if (area < minFraction * imgArea) break
+                        if (area > 0.99 * imgArea) continue
+                        val c2f = MatOfPoint2f(*cnt.toArray())
+                        val approx = MatOfPoint2f()
+                        try {
+                            val peri = Imgproc.arcLength(c2f, true)
+                            Imgproc.approxPolyDP(c2f, approx, 0.018 * peri, true)
+                            val pts = approx.toArray()
+                            if (pts.size == 4) {
+                                val polygon = MatOfPoint(*pts)
+                                val convex = try { Imgproc.isContourConvex(polygon) } finally { polygon.release() }
+                                if (convex) {
+                                    val ordered = orderPoints(pts.toList())
+                                    if (isPlausible(ordered) && area > bestArea) {
+                                        best = ordered
+                                        bestArea = area
+                                    }
+                                }
+                            }
+                        } finally {
+                            c2f.release()
+                            approx.release()
+                        }
                     }
+                } finally {
+                    contourInput.release()
+                    hierarchy.release()
+                    contours.forEach { it.release() }
                 }
             }
-        }
 
-        if (best == null && fallback) {
-            // Rotated bounding rectangle of the largest bright region.
-            val contours = ArrayList<MatOfPoint>()
-            Imgproc.findContours(otsu.clone(), contours, Mat(), Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
-            val largest = contours.maxByOrNull { Imgproc.contourArea(it) }
-            if (largest != null && Imgproc.contourArea(largest) > 0.25 * imgArea) {
-                val rect = Imgproc.minAreaRect(MatOfPoint2f(*largest.toArray()))
-                val box = Array(4) { Point() }
-                rect.points(box)
-                val ordered = orderPoints(box.toList())
-                if (isPlausible(ordered)) best = ordered
+            if (best == null && fallback) {
+                val contourInput = otsu.clone()
+                val hierarchy = Mat()
+                val contours = ArrayList<MatOfPoint>()
+                try {
+                    Imgproc.findContours(contourInput, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+                    val largest = contours.maxByOrNull { Imgproc.contourArea(it) }
+                    if (largest != null && Imgproc.contourArea(largest) > 0.25 * imgArea) {
+                        val points = MatOfPoint2f(*largest.toArray())
+                        try {
+                            val rect = Imgproc.minAreaRect(points)
+                            val box = Array(4) { Point() }
+                            rect.points(box)
+                            val ordered = orderPoints(box.toList())
+                            if (isPlausible(ordered)) best = ordered
+                        } finally {
+                            points.release()
+                        }
+                    }
+                } finally {
+                    contourInput.release()
+                    hierarchy.release()
+                    contours.forEach { it.release() }
+                }
             }
+            return best
+        } finally {
+            kernel3.release()
+            kernel5.release()
+            edges.release()
+            otsu.release()
+            otsuInv.release()
         }
-        edges.release(); otsu.release(); otsuInv.release()
-        return best
     }
 
     private fun isShadowy(gray: Mat, quad: List<Point>): Boolean {
         val mask = Mat.zeros(gray.size(), CvType.CV_8UC1)
-        Imgproc.fillConvexPoly(mask, MatOfPoint(*quad.toTypedArray()), Scalar(255.0))
-        Imgproc.erode(mask, mask, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(15.0, 15.0)))
+        val polygon = MatOfPoint(*quad.toTypedArray())
+        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(15.0, 15.0))
         val blur = Mat()
-        Imgproc.GaussianBlur(gray, blur, Size(0.0, 0.0), 18.0)
-        val mm = Core.minMaxLoc(blur, mask)
-        mask.release(); blur.release()
-        return mm.maxVal > 0 && mm.minVal / mm.maxVal < 0.55
+        try {
+            Imgproc.fillConvexPoly(mask, polygon, Scalar(255.0))
+            Imgproc.erode(mask, mask, kernel)
+            Imgproc.GaussianBlur(gray, blur, Size(0.0, 0.0), 18.0)
+            val mm = Core.minMaxLoc(blur, mask)
+            return mm.maxVal > 0 && mm.minVal / mm.maxVal < 0.55
+        } finally {
+            mask.release()
+            polygon.release()
+            kernel.release()
+            blur.release()
+        }
     }
 
     /** Orders four points as top-left, top-right, bottom-right, bottom-left. */
@@ -178,14 +222,20 @@ object ImageProcessor {
      * Renders the final page. [maxSide] limits the output's longer side (0 = native size,
      * still capped at [HARD_CAP]); the image is never upscaled.
      */
-    fun render(src: Bitmap, corners: List<NPoint>, s: ProcessSettings, maxSide: Int = 0): Bitmap {
+    fun render(
+        src: Bitmap,
+        corners: List<NPoint>,
+        s: ProcessSettings,
+        maxSide: Int = 0,
+        targetAspectRatio: Double? = null
+    ): Bitmap {
         val rgba = Mat()
         Utils.bitmapToMat(src, rgba)
         val rgb = Mat()
         Imgproc.cvtColor(rgba, rgb, Imgproc.COLOR_RGBA2RGB)
         rgba.release()
 
-        var m = warp(rgb, corners, maxSide)
+        var m = warp(rgb, corners, maxSide, targetAspectRatio)
         rgb.release()
 
         if (s.autoStraighten && s.filter != ScanFilter.PHOTO && s.filter != ScanFilter.ORIGINAL) {
@@ -209,7 +259,7 @@ object ImageProcessor {
 
     const val HARD_CAP = 4600
 
-    private fun warp(src: Mat, corners: List<NPoint>, maxSide: Int): Mat {
+    private fun warp(src: Mat, corners: List<NPoint>, maxSide: Int, targetAspectRatio: Double? = null): Mat {
         val w = src.cols().toDouble()
         val h = src.rows().toDouble()
         val p = corners.map { Point(it.x * w, it.y * h) }
@@ -217,6 +267,15 @@ object ImageProcessor {
         val left = dist(p[0], p[3]); val right = dist(p[1], p[2])
         var dw = max(top, bottom)
         var dh = max(left, right)
+        // ISO/IEC 7810 ID-1 cards (most bank, identity and access cards) use 85.60 x 53.98 mm.
+        // The optional ratio is used only by the dedicated two-sided card-copy workflow.
+        if (targetAspectRatio != null && targetAspectRatio > 0.5) {
+            // Keep the card's own orientation: a card photographed upright (taller than wide)
+            // gets the inverse ratio so it is not stretched. The caller rotates it afterwards.
+            val ratio = if (dw >= dh) targetAspectRatio else 1.0 / targetAspectRatio
+            if (dw / max(dh, 1.0) >= ratio) dh = dw / ratio
+            else dw = dh * ratio
+        }
         val limit = if (maxSide > 0) min(maxSide, HARD_CAP) else HARD_CAP
         val longer = max(dw, dh)
         if (longer > limit) {
@@ -233,12 +292,20 @@ object ImageProcessor {
         )
         val transform = Imgproc.getPerspectiveTransform(from, to)
         val dst = Mat()
-        Imgproc.warpPerspective(
-            src, dst, transform, Size(outW.toDouble(), outH.toDouble()),
-            Imgproc.INTER_CUBIC, Core.BORDER_REPLICATE
-        )
-        transform.release()
-        return dst
+        try {
+            Imgproc.warpPerspective(
+                src, dst, transform, Size(outW.toDouble(), outH.toDouble()),
+                Imgproc.INTER_CUBIC, Core.BORDER_REPLICATE
+            )
+            return dst
+        } catch (e: Exception) {
+            dst.release()
+            throw e
+        } finally {
+            from.release()
+            to.release()
+            transform.release()
+        }
     }
 
     private fun dist(a: Point, b: Point): Double {

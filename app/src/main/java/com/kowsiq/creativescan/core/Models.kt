@@ -39,5 +39,7 @@ data class ScanPage(
     val id: String,
     val file: File,
     val corners: List<NPoint>,
-    val settings: ProcessSettings
+    val settings: ProcessSettings,
+    /** True when this raster already represents a complete physical A4 sheet. */
+    val isIdCardCopy: Boolean = false
 )

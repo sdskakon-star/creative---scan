@@ -20,11 +20,12 @@ android {
         applicationId = "com.kowsiq.creativescan"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
-        // Keep the APK smaller: OpenCV ships native libraries for every ABI.
+        versionCode = 2
+        versionName = "1.1.0"
+        // Android phones use ARM ABIs. Exclude x86_64 emulator binaries from phone APKs;
+        // this removes a large OpenCV native library without affecting ARM phones.
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 
@@ -92,4 +93,6 @@ dependencies {
 
     // OpenCV for Android (Maven Central, bundles native libraries)
     implementation("org.opencv:opencv:4.9.0")
+
+    testImplementation("junit:junit:4.13.2")
 }

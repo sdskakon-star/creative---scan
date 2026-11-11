@@ -3,7 +3,7 @@ package com.kowsiq.creativescan.core
 import java.io.OutputStream
 import java.util.Locale
 
-class PdfImage(val jpeg: ByteArray, val width: Int, val height: Int)
+class PdfImage(val jpeg: ByteArray, val width: Int, val height: Int, val fullA4Page: Boolean = false)
 
 /**
  * Minimal, dependency-free PDF writer. Each page embeds the scan as a JPEG (DCTDecode)
@@ -42,7 +42,14 @@ class PdfWriter(private val out: OutputStream) {
             val pw: Double; val ph: Double
             val dw: Double; val dh: Double
             val x: Double; val y: Double
-            if (fitToPage) {
+            if (img.fullA4Page) {
+                // The image already contains an A4-sized white canvas; place it edge-to-edge
+                // on the PDF A4 media box so the physical card dimensions remain correct.
+                val landscape = img.width > img.height   // page was rotated by the user
+                pw = if (landscape) A4_H else A4_W
+                ph = if (landscape) A4_W else A4_H
+                dw = pw; dh = ph; x = 0.0; y = 0.0
+            } else if (fitToPage) {
                 val landscape = img.width > img.height
                 pw = if (landscape) A4_H else A4_W
                 ph = if (landscape) A4_W else A4_H

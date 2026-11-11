@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DocumentScanner
+import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
@@ -132,6 +133,12 @@ fun HomeScreen(vm: AppViewModel) {
                 }
             }
         }
+
+        Spacer(Modifier.height(12.dp))
+        ActionCard(
+            Icons.Rounded.CreditCard, "ID Card Scan", "Capture front and back on one A4 page",
+            Modifier.fillMaxWidth()
+        ) { vm.startIdCardScan() }
 
         Spacer(Modifier.height(14.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {

@@ -116,6 +116,7 @@ fun CameraScreen(vm: AppViewModel) {
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
     val capturing = remember { AtomicBoolean(false) }
     val autoCapture = rememberUpdatedState(vm.settings.autoCapture)
+    val cardCaptureStage = rememberUpdatedState(vm.idCardCaptureStage)
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
 
     fun takePhoto() {
@@ -127,6 +128,7 @@ fun CameraScreen(vm: AppViewModel) {
             ContextCompat.getMainExecutor(ctx),
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    capturing.set(false)
                     vm.onPhotoCaptured(file)
                 }
 
@@ -176,7 +178,12 @@ fun CameraScreen(vm: AppViewModel) {
                             }
                             val upright = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true)
                             if (upright !== raw) raw.recycle()
-                            val res = ImageProcessor.analyzeFrame(upright, 0.10, false, 480)
+                            val res = ImageProcessor.analyzeFrame(
+                                upright,
+                                if (cardCaptureStage.value > 0) 0.04 else 0.10,
+                                false,
+                                480
+                            )
                             upright.recycle()
 
                             val c = res.corners
@@ -186,8 +193,10 @@ fun CameraScreen(vm: AppViewModel) {
                             live = res
                             stable = steady
 
-                            if (c != null && steady >= READY_FRAMES && res.areaFraction > 0.25 &&
-                                !res.shadowy && autoCapture.value
+                            val minReadyArea = if (cardCaptureStage.value > 0) 0.10 else 0.25
+                            val acceptableLighting = !res.shadowy || cardCaptureStage.value > 0
+                            if (c != null && steady >= READY_FRAMES && res.areaFraction > minReadyArea &&
+                                acceptableLighting && autoCapture.value
                             ) {
                                 mainExecutor.execute { takePhotoState.value() }
                             }
@@ -216,6 +225,11 @@ fun CameraScreen(vm: AppViewModel) {
     }
 
     LaunchedEffect(torch, camera) { camera?.cameraControl?.enableTorch(torch) }
+    LaunchedEffect(vm.idCardCaptureStage) {
+        // Do not carry the front-side stability counter into the back-side capture.
+        stable = 0
+        live = null
+    }
     LaunchedEffect(focusPoint) {
         if (focusPoint != null) {
             delay(1200)
@@ -225,7 +239,19 @@ fun CameraScreen(vm: AppViewModel) {
 
     val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
     val l = live
-    val guidance = when {
+    val guidance = if (vm.idCardCaptureStage == 1) {
+        when {
+            l?.corners == null -> "Place the FRONT of the card flat inside the frame."
+            stable >= READY_FRAMES -> "Front side ready — hold still."
+            else -> "Front side detected — keep the full card visible."
+        }
+    } else if (vm.idCardCaptureStage == 2) {
+        when {
+            l?.corners == null -> "Now place the BACK of the card flat inside the frame."
+            stable >= READY_FRAMES -> "Back side ready — hold still."
+            else -> "Back side detected — keep the full card visible."
+        }
+    } else when {
         l?.corners == null -> "Find document edges."
         l.areaFraction < 0.25 -> "Move closer."
         l.shadowy -> "Too much shadow."
@@ -233,7 +259,8 @@ fun CameraScreen(vm: AppViewModel) {
         stable >= 3 -> "Hold steady."
         else -> "Document detected."
     }
-    val ready = l?.corners != null && stable >= READY_FRAMES && l.areaFraction > 0.25 && !l.shadowy
+    val readyArea = if (vm.idCardCaptureStage > 0) 0.10 else 0.25
+    val ready = l?.corners != null && stable >= READY_FRAMES && l.areaFraction > readyArea && !l.shadowy
 
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         Row(
@@ -241,6 +268,11 @@ fun CameraScreen(vm: AppViewModel) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = { vm.pop() }) { Icon(Icons.Rounded.Close, "Close", tint = Color.White) }
+            if (vm.idCardCaptureStage == 2) {
+                TextButton(onClick = { vm.retakeIdCardFront() }) {
+                    Text("Retake front", color = Cyan)
+                }
+            }
             Spacer(Modifier.weight(1f))
             FilterChip(
                 selected = vm.settings.autoCapture,
@@ -263,6 +295,15 @@ fun CameraScreen(vm: AppViewModel) {
                     Icon(if (torch) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff, "Flashlight", tint = Color.White)
                 }
             }
+        }
+
+        if (vm.idCardCaptureStage > 0) {
+            Text(
+                if (vm.idCardCaptureStage == 1) "ID CARD COPY  •  FRONT SIDE (1 OF 2)" else "ID CARD COPY  •  BACK SIDE (2 OF 2)",
+                color = Color.White,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.labelLarge
+            )
         }
 
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
