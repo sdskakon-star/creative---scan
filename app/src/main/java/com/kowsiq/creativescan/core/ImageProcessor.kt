@@ -345,11 +345,16 @@ object ImageProcessor {
     }
 
     const val HARD_CAP = 4600
+    private const val EDGE_INSET = 0.993
 
     private fun warp(src: Mat, corners: List<NPoint>, maxSide: Int, targetAspectRatio: Double? = null): Mat {
         val w = src.cols().toDouble()
         val h = src.rows().toDouble()
-        val p = corners.map { Point(it.x * w, it.y * h) }
+        val raw = corners.map { Point(it.x * w, it.y * h) }
+        // Detected edges are a few pixels off, which shows as a thin desk-coloured line along the page border.
+        // Pulling the corners in by ~0.7 % of their distance to the centre removes it.
+        val cx = raw.sumOf { it.x } / 4.0; val cy = raw.sumOf { it.y } / 4.0
+        val p = raw.map { Point(cx + (it.x - cx) * EDGE_INSET, cy + (it.y - cy) * EDGE_INSET) }
         val top = dist(p[0], p[1]); val bottom = dist(p[3], p[2])
         val left = dist(p[0], p[3]); val right = dist(p[1], p[2])
         var dw = max(top, bottom)
@@ -454,11 +459,15 @@ object ImageProcessor {
         rgb.release()
         val ch = ArrayList<Mat>()
         Core.split(lab, ch)
-        val norm = normalizeLuminance(ch[0], 0.85)
-        val eq = clahe(norm, 1.6)
+        val norm = normalizeLuminance(ch[0], 1.0)
+        val eq = clahe(norm, 1.2)
         norm.release()
-        eq.copyTo(ch[0]); eq.release()
-        neutralizePaper(ch, 190.0, 8.0)
+        // Levels: paper to white (also wipes faint creases and shadow remnants), text stays dark.
+        val leveled = Mat()
+        eq.convertTo(leveled, -1, 255.0 / 180.0, -25.0 * 255.0 / 180.0)
+        eq.release()
+        leveled.copyTo(ch[0]); leveled.release()
+        neutralizePaper(ch, 200.0, 10.0)
         Core.merge(ch, lab)
         ch.forEach { it.release() }
         val out = Mat()
@@ -512,7 +521,7 @@ object ImageProcessor {
         val norm = normalizeLuminance(ch[0], 1.0)
         // Levels: push paper to white, keep soft anti-aliased strokes.
         val leveled = Mat()
-        norm.convertTo(leveled, -1, 255.0 / 185.0, -40.0 * 255.0 / 185.0)
+        norm.convertTo(leveled, -1, 255.0 / 165.0, -35.0 * 255.0 / 165.0)
         norm.release()
         leveled.copyTo(ch[0]); leveled.release()
         // Remove paper tint only where chroma is tiny; coloured stamps/ink keep their colour.
@@ -556,7 +565,7 @@ object ImageProcessor {
         l.convertTo(l32, CvType.CV_32F)
         bg.convertTo(bg32, CvType.CV_32F)
         bg.release()
-        Core.max(bg32, Scalar(150.0), bg32)
+        Core.max(bg32, Scalar(backgroundFloor(bg32)), bg32)
         val res32 = Mat()
         Core.divide(l32, bg32, res32, 245.0)
         l32.release(); bg32.release()
@@ -567,6 +576,14 @@ object ImageProcessor {
         Core.addWeighted(res, strength, l, 1.0 - strength, 0.0, out)
         res.release()
         return out
+    }
+
+    /** Floor for the background estimate: protects dark photos but still lifts a dimly lit page. */
+    private fun backgroundFloor(bg32: Mat): Double {
+        val small = Mat(); Imgproc.resize(bg32, small, Size(48.0, 48.0), 0.0, 0.0, Imgproc.INTER_AREA)
+        val v = FloatArray(48 * 48); small.get(0, 0, v); small.release()
+        v.sort()
+        return (v[(v.size * 0.95).toInt()] * 0.6).toDouble().coerceIn(60.0, 150.0)
     }
 
     private fun estimateBackground(gray: Mat): Mat {
