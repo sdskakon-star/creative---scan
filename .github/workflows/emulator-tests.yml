@@ -10,7 +10,7 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -50,16 +50,19 @@ jobs:
           script: |
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-            adb shell am instrument -w com.kowsiq.creativescan.test/androidx.test.runner.AndroidJUnitRunner > instrument.txt 2>&1 || true
+            timeout 900 adb shell am instrument -w -e notClass com.kowsiq.creativescan.UiSmokeTest com.kowsiq.creativescan.test/androidx.test.runner.AndroidJUnitRunner > instrument.txt 2>&1 || true
+            timeout 480 adb shell am instrument -w -e class com.kowsiq.creativescan.UiSmokeTest com.kowsiq.creativescan.test/androidx.test.runner.AndroidJUnitRunner > instrument-ui.txt 2>&1 || true
             mkdir -p test-out
             adb pull /sdcard/Android/data/com.kowsiq.creativescan/files/out/. test-out/ || true
             adb logcat -d -s CSTEST:I AndroidRuntime:E > test-out/logcat.txt || true
-            cp instrument.txt test-out/instrument.txt
+            cp instrument.txt instrument-ui.txt test-out/
 
       - name: Show instrumentation result
         if: always()
         run: |
           cat instrument.txt || true
+          echo ---- ui ----
+          cat instrument-ui.txt || true
           echo ---- metrics ----
           cat test-out/metrics.txt || true
 
@@ -75,3 +78,4 @@ jobs:
       - name: Fail if any test failed
         run: |
           grep -E "^OK \(" instrument.txt
+          grep -E "^OK \(" instrument-ui.txt

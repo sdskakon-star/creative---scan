@@ -203,7 +203,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (a4Page == null) {
                     message = "Could not create the A4 card copy. Please scan both sides again."
                     if (stack.last() == Screen.CAMERA) stack.removeAt(stack.lastIndex)
-                    navigate(Screen.HOME)
+                    if (stack.last() != Screen.HOME) navigate(Screen.HOME)
                     return@launch
                 }
                 placeCapturedPage(a4Page)
@@ -348,7 +348,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     ): ScanPage? {
         val bmp = ImageIO.decodeUri(ctx, uri, 4096) ?: return null
         val det = try {
-            ImageProcessor.analyzeFrame(bmp, minAreaFraction, true, 1000)
+            ImageProcessor.analyzeFrame(bmp, minAreaFraction, true, 1000, cardOnly = requireDetection)
         } catch (e: Exception) {
             bmp.recycle()
             return null

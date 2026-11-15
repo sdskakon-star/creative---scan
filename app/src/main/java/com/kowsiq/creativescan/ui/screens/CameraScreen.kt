@@ -190,7 +190,8 @@ fun CameraScreen(vm: AppViewModel) {
                                 upright,
                                 if (cardCaptureStage.value > 0) 0.04 else 0.10,
                                 false,
-                                480
+                                480,
+                                cardOnly = cardCaptureStage.value > 0
                             )
                             upright.recycle()
 
@@ -343,6 +344,21 @@ fun CameraScreen(vm: AppViewModel) {
                             }
                         }
                     ) {
+                        if (vm.idCardCaptureStage > 0 && !vm.idCardAwaitingBack) {
+                            // Fixed ID-1 guide frame (85.6 x 54 mm) so the card can be lined up by eye.
+                            val gw = size.width * 0.86f
+                            val gh = gw * 53.98f / 85.60f
+                            drawRoundRect(
+                                Color.White.copy(alpha = 0.85f),
+                                topLeft = Offset((size.width - gw) / 2f, (size.height - gh) / 2f),
+                                size = androidx.compose.ui.geometry.Size(gw, gh),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(14.dp.toPx(), 14.dp.toPx()),
+                                style = Stroke(
+                                    width = 2.dp.toPx(),
+                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(22f, 14f))
+                                )
+                            )
+                        }
                         val corners = live?.corners
                         if (corners != null) {
                             val pts = corners.map { Offset(it.x * size.width, it.y * size.height) }

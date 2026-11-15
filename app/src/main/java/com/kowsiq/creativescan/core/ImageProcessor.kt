@@ -6,6 +6,7 @@ import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
 import org.opencv.core.MatOfDouble
+import org.opencv.core.MatOfInt
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Point
@@ -42,7 +43,8 @@ object ImageProcessor {
         src: Bitmap,
         minAreaFraction: Double = 0.10,
         allowFallback: Boolean = false,
-        workSize: Int = 480
+        workSize: Int = 480,
+        cardOnly: Boolean = false
     ): LiveResult {
         val scaled = scaleToMax(src, workSize)
         val rgba = Mat()
@@ -51,12 +53,31 @@ object ImageProcessor {
 
         val gray = Mat()
         Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+        // ID cards often have a luminance close to the table they lie on while differing clearly
+        // in colour, so card detection also looks for edges in each colour channel.
+        val channels = ArrayList<Mat>()
+        if (cardOnly) {
+            val split = ArrayList<Mat>()
+            Core.split(rgba, split)
+            for (i in split.indices) {
+                if (i < 3) {
+                    Imgproc.GaussianBlur(split[i], split[i], Size(5.0, 5.0), 0.0)
+                    channels.add(split[i])
+                } else {
+                    split[i].release()
+                }
+            }
+        }
         rgba.release()
         Imgproc.GaussianBlur(gray, gray, Size(5.0, 5.0), 0.0)
 
         val w = gray.cols().toDouble()
         val h = gray.rows().toDouble()
-        val quad = findQuad(gray, minAreaFraction, allowFallback)
+        val quad = try {
+            findQuad(gray, minAreaFraction, allowFallback, channels, cardOnly)
+        } finally {
+            channels.forEach { it.release() }
+        }
         val result = if (quad == null) {
             LiveResult(null, 0.0, false)
         } else {
@@ -72,7 +93,13 @@ object ImageProcessor {
         return result
     }
 
-    private fun findQuad(gray: Mat, minFraction: Double, fallback: Boolean): List<Point>? {
+    private fun findQuad(
+        gray: Mat,
+        minFraction: Double,
+        fallback: Boolean,
+        extraChannels: List<Mat>,
+        cardOnly: Boolean
+    ): List<Point>? {
         val imgArea = gray.rows().toDouble() * gray.cols()
         val kernel3 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(3.0, 3.0))
         val kernel5 = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(5.0, 5.0))
@@ -80,8 +107,15 @@ object ImageProcessor {
         val otsu = Mat()
         val otsuInv = Mat()
         try {
-            val mean = Core.mean(gray).`val`[0]
-            Imgproc.Canny(gray, edges, max(20.0, 0.66 * mean), min(255.0, max(60.0, 1.33 * mean)))
+            for ((index, source) in (listOf(gray) + extraChannels).withIndex()) {
+                val mean = Core.mean(source).`val`[0]
+                val e = if (index == 0) edges else Mat()
+                Imgproc.Canny(source, e, max(20.0, 0.66 * mean), min(255.0, max(60.0, 1.33 * mean)))
+                if (index > 0) {
+                    Core.bitwise_or(edges, e, edges)
+                    e.release()
+                }
+            }
             Imgproc.dilate(edges, edges, kernel3)
             Imgproc.morphologyEx(edges, edges, Imgproc.MORPH_CLOSE, kernel3, Point(-1.0, -1.0), 2)
 
@@ -114,10 +148,18 @@ object ImageProcessor {
                                 val convex = try { Imgproc.isContourConvex(polygon) } finally { polygon.release() }
                                 if (convex) {
                                     val ordered = orderPoints(pts.toList())
-                                    if (isPlausible(ordered) && area > bestArea) {
+                                    if (isPlausible(ordered) && (!cardOnly || isCardShaped(ordered)) && area > bestArea) {
                                         best = ordered
                                         bestArea = area
                                     }
+                                }
+                            } else if (cardOnly) {
+                                // Noise touching the outline can add extra corners; the convex hull
+                                // of a card outline is still a clean four-sided shape.
+                                val hullQuad = hullToQuad(cnt)
+                                if (hullQuad != null && isPlausible(hullQuad) && isCardShaped(hullQuad) && area > bestArea) {
+                                    best = hullQuad
+                                    bestArea = area
                                 }
                             }
                         } finally {
@@ -139,14 +181,18 @@ object ImageProcessor {
                 try {
                     Imgproc.findContours(contourInput, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
                     val largest = contours.maxByOrNull { Imgproc.contourArea(it) }
-                    if (largest != null && Imgproc.contourArea(largest) > 0.25 * imgArea) {
+                    // A region that fills (almost) the whole frame is a blank/uniform image, not a document.
+                    val largestArea = if (largest != null) Imgproc.contourArea(largest) else 0.0
+                    if (largest != null && largestArea > (if (cardOnly) minFraction else 0.25) * imgArea &&
+                        largestArea < 0.97 * imgArea
+                    ) {
                         val points = MatOfPoint2f(*largest.toArray())
                         try {
                             val rect = Imgproc.minAreaRect(points)
                             val box = Array(4) { Point() }
                             rect.points(box)
                             val ordered = orderPoints(box.toList())
-                            if (isPlausible(ordered)) best = ordered
+                            if (isPlausible(ordered) && (!cardOnly || isCardShaped(ordered))) best = ordered
                         } finally {
                             points.release()
                         }
@@ -195,6 +241,34 @@ object ImageProcessor {
         val tr = p[diff.indexOf(diff.min())]
         val bl = p[diff.indexOf(diff.max())]
         return listOf(tl, tr, br, bl)
+    }
+
+    /** ID-1 cards are 85.6 x 53.98 mm (1.586); 1.30 to 1.85 also tolerates perspective and ID-3 pages. */
+    private fun isCardShaped(p: List<Point>): Boolean {
+        val w = (dist(p[0], p[1]) + dist(p[3], p[2])) / 2
+        val h = (dist(p[0], p[3]) + dist(p[1], p[2])) / 2
+        if (w < 1 || h < 1) return false
+        return max(w, h) / min(w, h) in 1.30..1.85
+    }
+
+    private fun hullToQuad(contour: MatOfPoint): List<Point>? {
+        val hullIdx = MatOfInt()
+        val hull = MatOfPoint()
+        val hull2f = MatOfPoint2f()
+        val approx = MatOfPoint2f()
+        try {
+            Imgproc.convexHull(contour, hullIdx)
+            val idx = hullIdx.toArray()
+            val src = contour.toArray()
+            if (idx.size < 4) return null
+            hull.fromList(idx.map { src[it] })
+            hull2f.fromList(hull.toList())
+            Imgproc.approxPolyDP(hull2f, approx, 0.03 * Imgproc.arcLength(hull2f, true), true)
+            val pts = approx.toArray()
+            return if (pts.size == 4) orderPoints(pts.toList()) else null
+        } finally {
+            hullIdx.release(); hull.release(); hull2f.release(); approx.release()
+        }
     }
 
     private fun isPlausible(p: List<Point>): Boolean {
