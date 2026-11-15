@@ -29,10 +29,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Compare
+import androidx.compose.material.icons.rounded.Redo
 import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Undo
 import androidx.compose.material.icons.rounded.RotateLeft
 import androidx.compose.material.icons.rounded.RotateRight
 import androidx.compose.material3.Button
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -75,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import com.kowsiq.creativescan.core.ImageProcessor
 import com.kowsiq.creativescan.core.NPoint
 import com.kowsiq.creativescan.core.ProcessSettings
+import com.kowsiq.creativescan.core.EditHistory
 import com.kowsiq.creativescan.core.ScanFilter
 import com.kowsiq.creativescan.core.ScanPage
 import com.kowsiq.creativescan.ui.AppViewModel
@@ -109,6 +113,21 @@ private fun EditContent(vm: AppViewModel, index: Int, page: ScanPage) {
     var showBefore by remember(page.id) { mutableStateOf(false) }
     var result by remember(page.id) { mutableStateOf<ImageBitmap?>(null) }
     var working by remember(page.id) { mutableStateOf(false) }
+
+    // Undo / redo of everything the user changes on this screen (crop corners and enhance settings).
+    val history = remember(page.id) { EditHistory(EditSnapshot(page.corners, page.settings)) }
+    var historyTick by remember(page.id) { mutableIntStateOf(0) }
+    fun commit() { if (history.push(EditSnapshot(corners, st))) historyTick++ }
+    fun restore(snap: EditSnapshot?) {
+        if (snap == null) return
+        corners = snap.corners; st = snap.settings; historyTick++
+    }
+    val canUndo = historyTick.let { history.canUndo }
+    val canRedo = historyTick.let { history.canRedo }
+    val onUndo: () -> Unit = { commit(); restore(history.undo()) }
+    val onRedo: () -> Unit = { restore(history.redo()) }
+    // Corner dragging is continuous: record it once the finger has rested for a moment.
+    LaunchedEffect(corners) { delay(500); commit() }
 
     LaunchedEffect(page.id) { source = vm.loadPreviewSource(page) }
 
@@ -202,17 +221,22 @@ private fun EditContent(vm: AppViewModel, index: Int, page: ScanPage) {
                         }) { Text("Auto-detect") }
                         OutlinedButton(onClick = { corners = ImageProcessor.defaultCorners(0f) }) { Text("Full image") }
                     }
+                    Row { UndoRedoChips(canUndo, canRedo, onUndo, onRedo) }
                 }
             } else {
                 EnhanceControls(
                     st = st,
                     showBefore = showBefore,
-                    onSettings = { st = it },
+                    onSettings = { st = it; commit() },
+                    onSlide = { st = it },
+                    onSlideEnd = { commit() },
                     onBefore = { showBefore = it },
                     onRevert = {
                         st = ProcessSettings(ScanFilter.ORIGINAL, 0f, 1f, 0f, false, 0)
                         showBefore = false
-                    }
+                        commit()
+                    },
+                    canUndo = canUndo, canRedo = canRedo, onUndo = onUndo, onRedo = onRedo
                 )
             }
         }
@@ -224,8 +248,11 @@ private fun EnhanceControls(
     st: ProcessSettings,
     showBefore: Boolean,
     onSettings: (ProcessSettings) -> Unit,
+    onSlide: (ProcessSettings) -> Unit,
+    onSlideEnd: () -> Unit,
     onBefore: (Boolean) -> Unit,
-    onRevert: () -> Unit
+    onRevert: () -> Unit,
+    canUndo: Boolean, canRedo: Boolean, onUndo: () -> Unit, onRedo: () -> Unit
 ) {
     Column(
         Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -248,14 +275,14 @@ private fun EnhanceControls(
                 }
             }
         }
-        LabeledSlider("Brightness", st.brightness, -100f..100f, "${st.brightness.toInt()}", 0f) {
-            onSettings(st.copy(brightness = it))
+        LabeledSlider("Brightness", st.brightness, -100f..100f, "${st.brightness.toInt()}", 0f, onSlideEnd) {
+            onSlide(st.copy(brightness = it))
         }
-        LabeledSlider("Contrast", st.contrast, 0.5f..1.5f, String.format(java.util.Locale.US, "%.2f", st.contrast), 1f) {
-            onSettings(st.copy(contrast = it))
+        LabeledSlider("Contrast", st.contrast, 0.5f..1.5f, String.format(java.util.Locale.US, "%.2f", st.contrast), 1f, onSlideEnd) {
+            onSlide(st.copy(contrast = it))
         }
-        LabeledSlider("Sharpness", st.sharpness, 0f..1f, "${(st.sharpness * 100).toInt()}%", 0.3f) {
-            onSettings(st.copy(sharpness = it))
+        LabeledSlider("Sharpness", st.sharpness, 0f..1f, "${(st.sharpness * 100).toInt()}%", 0.3f, onSlideEnd) {
+            onSlide(st.copy(sharpness = it))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { onSettings(st.copy(rotation = (st.rotation + 270) % 360)) }) {
@@ -271,7 +298,14 @@ private fun EnhanceControls(
                 leadingIcon = { Icon(Icons.Rounded.Compare, null, Modifier.size(18.dp)) }
             )
         }
-        TextButton(onClick = onRevert) { Text("Revert to original", maxLines = 1, softWrap = false) }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AssistChip(
+                onClick = onRevert,
+                label = { Text("Revert to original", maxLines = 1, softWrap = false) },
+                leadingIcon = { Icon(Icons.Rounded.Replay, null, Modifier.size(18.dp)) }
+            )
+            UndoRedoChips(canUndo, canRedo, onUndo, onRedo)
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Auto-straighten", Modifier.weight(1f))
             Switch(checked = st.autoStraighten, onCheckedChange = { onSettings(st.copy(autoStraighten = it)) })
@@ -282,23 +316,23 @@ private fun EnhanceControls(
 @Composable
 private fun LabeledSlider(
     label: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String,
-    default: Float, onChange: (Float) -> Unit
+    default: Float, onFinished: () -> Unit, onChange: (Float) -> Unit
 ) {
     val step = (range.endInclusive - range.start) / 20f
     Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, fontWeight = FontWeight.Medium, fontSize = 13.sp, modifier = Modifier.weight(1f))
             // Tap the number to go back to the default value.
-            TextButton(onClick = { onChange(default) }) {
+            TextButton(onClick = { onChange(default); onFinished() }) {
                 Text(valueText, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { onChange((value - step).coerceIn(range.start, range.endInclusive)) }) {
+            IconButton(onClick = { onChange((value - step).coerceIn(range.start, range.endInclusive)); onFinished() }) {
                 Text("\u2212", fontSize = 22.sp)
             }
-            HandleOnlySlider(value, range, onChange, Modifier.weight(1f))
-            IconButton(onClick = { onChange((value + step).coerceIn(range.start, range.endInclusive)) }) {
+            HandleOnlySlider(value, range, onChange, onFinished, Modifier.weight(1f))
+            IconButton(onClick = { onChange((value + step).coerceIn(range.start, range.endInclusive)); onFinished() }) {
                 Text("+", fontSize = 22.sp)
             }
         }
@@ -311,10 +345,11 @@ private fun LabeledSlider(
  */
 @Composable
 private fun HandleOnlySlider(
-    value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit, modifier: Modifier = Modifier
+    value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit, onFinished: () -> Unit, modifier: Modifier = Modifier
 ) {
     val current by rememberUpdatedState(value)
     val change by rememberUpdatedState(onChange)
+    val finished by rememberUpdatedState(onFinished)
     val active = MaterialTheme.colorScheme.primary
     val inactive = MaterialTheme.colorScheme.surfaceVariant
     Canvas(
@@ -335,6 +370,7 @@ private fun HandleOnlySlider(
                             val f = ((c.position.x - pad) / usable).coerceIn(0f, 1f)
                             change(range.start + f * (range.endInclusive - range.start))
                         }
+                        finished()
                     }
                 }
             }
@@ -465,6 +501,24 @@ private fun ScanSweep(modifier: Modifier = Modifier) {
             androidx.compose.ui.geometry.Offset(0f, cy),
             androidx.compose.ui.geometry.Offset(size.width, cy),
             strokeWidth = 3f
+        )
+    }
+}
+
+
+private data class EditSnapshot(val corners: List<NPoint>, val settings: ProcessSettings)
+
+/** Undo / redo chips (same bordered look as "Before / After"); greyed out when there is nothing to do. */
+@Composable
+private fun UndoRedoChips(canUndo: Boolean, canRedo: Boolean, onUndo: () -> Unit, onRedo: () -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        AssistChip(
+            onClick = onUndo, enabled = canUndo,
+            label = { Icon(Icons.Rounded.Undo, "Undo", Modifier.size(18.dp)) }
+        )
+        AssistChip(
+            onClick = onRedo, enabled = canRedo,
+            label = { Icon(Icons.Rounded.Redo, "Redo", Modifier.size(18.dp)) }
         )
     }
 }
