@@ -500,12 +500,11 @@ object ImageProcessor {
         Imgproc.GaussianBlur(gray, gray, Size(3.0, 3.0), 0.0)
         val norm = normalizeLuminance(gray, 1.0)
         gray.release()
-        val block = oddAtLeast(min(norm.cols(), norm.rows()) / 35, 21)
+        // After illumination normalisation the paper sits near 245, so a fixed cut-off keeps text
+        // (dark) and drops creases/shadow remnants (only slightly darker than paper). A local
+        // adaptive threshold would turn every thin crease into a black line.
         val bin = Mat()
-        Imgproc.adaptiveThreshold(
-            norm, bin, 255.0, Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
-            Imgproc.THRESH_BINARY, block, 10.0
-        )
+        Imgproc.threshold(norm, bin, 150.0, 255.0, Imgproc.THRESH_BINARY)
         norm.release()
         val out = Mat()
         Imgproc.cvtColor(bin, out, Imgproc.COLOR_GRAY2RGB)
