@@ -3,6 +3,9 @@ package com.kowsiq.creativescan.ui.screens
 import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -243,13 +247,13 @@ private fun EnhanceControls(
                 }
             }
         }
-        LabeledSlider("Brightness", st.brightness, -100f..100f, "${st.brightness.toInt()}") {
+        LabeledSlider("Brightness", st.brightness, -100f..100f, "${st.brightness.toInt()}", 0f) {
             onSettings(st.copy(brightness = it))
         }
-        LabeledSlider("Contrast", st.contrast, 0.5f..1.5f, String.format(java.util.Locale.US, "%.2f", st.contrast)) {
+        LabeledSlider("Contrast", st.contrast, 0.5f..1.5f, String.format(java.util.Locale.US, "%.2f", st.contrast), 1f) {
             onSettings(st.copy(contrast = it))
         }
-        LabeledSlider("Sharpness", st.sharpness, 0f..1f, "${(st.sharpness * 100).toInt()}%") {
+        LabeledSlider("Sharpness", st.sharpness, 0f..1f, "${(st.sharpness * 100).toInt()}%", 0.3f) {
             onSettings(st.copy(sharpness = it))
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -275,13 +279,73 @@ private fun EnhanceControls(
 }
 
 @Composable
-private fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String, onChange: (Float) -> Unit) {
+private fun LabeledSlider(
+    label: String, value: Float, range: ClosedFloatingPointRange<Float>, valueText: String,
+    default: Float, onChange: (Float) -> Unit
+) {
+    val step = (range.endInclusive - range.start) / 20f
     Column {
-        Row {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, fontWeight = FontWeight.Medium, fontSize = 13.sp, modifier = Modifier.weight(1f))
-            Text(valueText, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Tap the number to go back to the default value.
+            TextButton(onClick = { onChange(default) }) {
+                Text(valueText, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        Slider(value = value, onValueChange = onChange, valueRange = range)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { onChange((value - step).coerceIn(range.start, range.endInclusive)) }) {
+                Text("\u2212", fontSize = 22.sp)
+            }
+            HandleOnlySlider(value, range, onChange, Modifier.weight(1f))
+            IconButton(onClick = { onChange((value + step).coerceIn(range.start, range.endInclusive)) }) {
+                Text("+", fontSize = 22.sp)
+            }
+        }
+    }
+}
+
+/**
+ * Slider that only moves when the round handle itself is dragged. A finger that lands anywhere else
+ * on the track is ignored, so scrolling the page with a thumb over a slider no longer changes values.
+ */
+@Composable
+private fun HandleOnlySlider(
+    value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit, modifier: Modifier = Modifier
+) {
+    val current by rememberUpdatedState(value)
+    val change by rememberUpdatedState(onChange)
+    val active = MaterialTheme.colorScheme.primary
+    val inactive = MaterialTheme.colorScheme.surfaceVariant
+    Canvas(
+        modifier
+            .height(40.dp)
+            .pointerInput(range) {
+                val pad = 14.dp.toPx()
+                val grab = 28.dp.toPx()
+                androidx.compose.foundation.gestures.awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val usable = (size.width - 2 * pad).coerceAtLeast(1f)
+                    val thumbX = pad + (current - range.start) / (range.endInclusive - range.start) * usable
+                    if (kotlin.math.abs(down.position.x - thumbX) > grab) return@awaitEachGesture
+                    val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { c, _ -> c.consume() }
+                    if (slop != null) {
+                        horizontalDrag(down.id) { c ->
+                            c.consume()
+                            val f = ((c.position.x - pad) / usable).coerceIn(0f, 1f)
+                            change(range.start + f * (range.endInclusive - range.start))
+                        }
+                    }
+                }
+            }
+    ) {
+        val pad = 14.dp.toPx()
+        val usable = size.width - 2 * pad
+        val f = ((current - range.start) / (range.endInclusive - range.start)).coerceIn(0f, 1f)
+        val x = pad + f * usable
+        val y = size.height / 2
+        drawLine(inactive, androidx.compose.ui.geometry.Offset(pad, y), androidx.compose.ui.geometry.Offset(pad + usable, y), strokeWidth = 6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawLine(active, androidx.compose.ui.geometry.Offset(pad, y), androidx.compose.ui.geometry.Offset(x, y), strokeWidth = 6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        drawCircle(active, 11.dp.toPx(), androidx.compose.ui.geometry.Offset(x, y))
     }
 }
 
