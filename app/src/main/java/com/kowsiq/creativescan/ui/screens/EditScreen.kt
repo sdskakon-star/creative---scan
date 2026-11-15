@@ -1,6 +1,7 @@
 package com.kowsiq.creativescan.ui.screens
 
 import android.graphics.Bitmap
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
