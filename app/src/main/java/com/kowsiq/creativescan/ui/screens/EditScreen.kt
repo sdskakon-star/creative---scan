@@ -322,11 +322,11 @@ private fun HandleOnlySlider(
             .pointerInput(range) {
                 val pad = 14.dp.toPx()
                 val grab = 28.dp.toPx()
-                androidx.compose.foundation.gestures.awaitEachGesture {
+                androidx.compose.foundation.gestures.forEachGesture { awaitPointerEventScope {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val usable = (size.width - 2 * pad).coerceAtLeast(1f)
                     val thumbX = pad + (current - range.start) / (range.endInclusive - range.start) * usable
-                    if (kotlin.math.abs(down.position.x - thumbX) > grab) return@awaitEachGesture
+                    if (kotlin.math.abs(down.position.x - thumbX) > grab) return@awaitPointerEventScope
                     val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { c, _ -> c.consume() }
                     if (slop != null) {
                         horizontalDrag(down.id) { c ->
@@ -335,7 +335,7 @@ private fun HandleOnlySlider(
                             change(range.start + f * (range.endInclusive - range.start))
                         }
                     }
-                }
+                } }
             }
     ) {
         val pad = 14.dp.toPx()
