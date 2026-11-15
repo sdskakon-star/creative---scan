@@ -2,13 +2,13 @@ package com.kowsiq.creativescan.core
 
 import java.io.File
 
-enum class ScanFilter(val label: String) {
-    ORIGINAL("Original Color"),
-    ENHANCED("Enhanced Color"),
-    GRAYSCALE("Grayscale"),
-    BLACK_WHITE("Black & White"),
-    DOCUMENT_CLEAN("Document Clean"),
-    PHOTO("Photo Mode")
+enum class ScanFilter(val label: String, val shortLabel: String) {
+    ORIGINAL("Original Color", "Original"),
+    ENHANCED("Enhanced Color", "Enhanced"),
+    GRAYSCALE("Grayscale", "Gray"),
+    BLACK_WHITE("Black & White", "B&W"),
+    DOCUMENT_CLEAN("Document Clean", "Clean"),
+    PHOTO("Photo Mode", "Photo")
 }
 
 /** A point normalised to 0..1 relative to the image width/height. */

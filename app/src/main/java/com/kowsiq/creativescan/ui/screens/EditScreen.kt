@@ -220,6 +220,10 @@ private fun EnhanceControls(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         // All filters visible at once (no sideways scrolling): two rows of three.
+        Text(
+            "Filter: " + st.filter.label,
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         ScanFilter.values().toList().chunked(3).forEach { rowFilters ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 rowFilters.forEach { f ->
@@ -227,7 +231,7 @@ private fun EnhanceControls(
                         modifier = Modifier.weight(1f),
                         selected = st.filter == f,
                         onClick = { onSettings(st.copy(filter = f)) },
-                        label = { Text(f.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                        label = { Text(f.shortLabel, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
                     )
                 }
             }
