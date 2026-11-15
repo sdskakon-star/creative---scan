@@ -354,7 +354,9 @@ object ImageProcessor {
         // Detected edges are a few pixels off, which shows as a thin desk-coloured line along the page border.
         // Pulling the corners in by ~0.7 % of their distance to the centre removes it.
         val cx = raw.sumOf { it.x } / 4.0; val cy = raw.sumOf { it.y } / 4.0
-        val p = raw.map { Point(cx + (it.x - cx) * EDGE_INSET, cy + (it.y - cy) * EDGE_INSET) }
+        val fullFrame = corners.all { (it.x < 0.002f || it.x > 0.998f) && (it.y < 0.002f || it.y > 0.998f) }
+        val k = if (fullFrame) 1.0 else EDGE_INSET   // an already composed sheet (e.g. the A4 ID page) is never trimmed
+        val p = raw.map { Point(cx + (it.x - cx) * k, cy + (it.y - cy) * k) }
         val top = dist(p[0], p[1]); val bottom = dist(p[3], p[2])
         val left = dist(p[0], p[3]); val right = dist(p[1], p[2])
         var dw = max(top, bottom)
