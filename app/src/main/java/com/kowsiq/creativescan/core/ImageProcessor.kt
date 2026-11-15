@@ -504,7 +504,7 @@ object ImageProcessor {
         // (dark) and drops creases/shadow remnants (only slightly darker than paper). A local
         // adaptive threshold would turn every thin crease into a black line.
         val bin = Mat()
-        Imgproc.threshold(norm, bin, 150.0, 255.0, Imgproc.THRESH_BINARY)
+        Imgproc.threshold(norm, bin, 175.0, 255.0, Imgproc.THRESH_BINARY)
         norm.release()
         val out = Mat()
         Imgproc.cvtColor(bin, out, Imgproc.COLOR_GRAY2RGB)
