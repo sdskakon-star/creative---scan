@@ -1,12 +1,15 @@
 package com.kowsiq.creativescan
 
+import android.Manifest
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
+import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.rule.GrantPermissionRule
 import com.kowsiq.creativescan.TestSupport.log
 import com.kowsiq.creativescan.core.IdCardLayout
 import com.kowsiq.creativescan.data.DocumentRepository
@@ -16,6 +19,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.opencv.android.OpenCVLoader
@@ -30,6 +34,18 @@ import kotlin.math.abs
 class AppFlowTest {
     private val instr = InstrumentationRegistry.getInstrumentation()
     private lateinit var vm: AppViewModel
+
+    // Android 8/9 need the storage permission to write into Documents/Creative Scan (the app asks for it
+    // before exporting; on Android 10+ MediaStore needs none).
+    private val storagePermissions: Array<String> =
+        if (Build.VERSION.SDK_INT <= 28) {
+            arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.READ_EXTERNAL_STORAGE)
+        } else {
+            emptyArray()
+        }
+
+    @get:Rule
+    val permissionRule: GrantPermissionRule = GrantPermissionRule.grant(*storagePermissions)
 
     @Before
     fun setUp() {
