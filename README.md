@@ -97,10 +97,25 @@ Android 8–9 asks for the storage permission once.
 - Explicitly release OpenCV contour, hierarchy, kernel, polygon, and perspective-transform Mats to reduce native-memory growth during repeated scanning.
 - Excluded x86_64 OpenCV binaries from phone APKs; ARM64 and ARM32 phone support remains.
 
-**Build verification:** every push runs two GitHub Actions workflows. *Build APK* runs `gradle assembleDebug` and publishes
-`CreativeScan-debug.apk` as a GitHub Release. *Unit tests* runs JVM tests for the ID-card A4 layout (both cards centred, ISO ID-1
-size at 200 dpi) and for the PDF writer (valid structure, page order, edge-to-edge A4 card page, rotation). Camera capture,
-OpenCV detection and on-device JPEG/PDF export are not covered by automated tests; check them on a real phone.
+**Build verification:** every push runs three GitHub Actions workflows. *Build APK* runs `gradle assembleDebug` and publishes
+`CreativeScan-debug.apk` as a GitHub Release. *Unit tests* runs JVM tests for the ID-card A4 layout and the PDF writer.
+*Emulator tests* installs the app on Android emulators (API 28 and API 34) and runs the real OpenCV pipeline on synthetic photos
+with known geometry: paper and ID-card corner detection, shadow flattening for every filter, true black-and-white output,
+ID colour preservation, both ID sides landing in the exact middle of A4 (pixel-measured), PDF export re-opened with Android's own
+`PdfRenderer`, JPEG export, document listing, and a walk through every screen. Outputs (images and metrics) of each emulator
+run are published to the `results-api28` / `results-api34` branches. A real camera on a real phone is **not** covered: the
+emulator only provides a virtual scene, so live detection, focus, torch and auto-capture still need a quick check on your phone.
+
+## Version 1.1.2 changes
+
+- ID card detection now also looks for edges in each colour channel, so a blue/grey card on a similar-brightness table is found.
+  Candidates must have an ID-card aspect ratio, and the live camera uses the same rule. A blank or uniform photo is no longer
+  accepted as a card.
+- ID cards keep their printed colours exactly (no white balance, no whitening). Previously the Enhanced filter washed out
+  stamps, photos and coloured backgrounds.
+- Cards are fitted onto the A4 page with area-averaged scaling, which keeps small printed text crisp.
+- The ID camera screen now draws a dashed card-shaped guide frame.
+- Fixed a duplicated Home entry on the back stack after a rejected ID capture.
 
 Portrait-held ID cards are not stretched: they are corrected at their own aspect ratio and then rotated to landscape.
 

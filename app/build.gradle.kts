@@ -20,8 +20,8 @@ android {
         applicationId = "com.kowsiq.creativescan"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.1.1"
+        versionCode = 4
+        versionName = "1.1.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Android phones use ARM ABIs. Exclude x86_64 emulator binaries from phone APKs;
         // this removes a large OpenCV native library without affecting ARM phones.
