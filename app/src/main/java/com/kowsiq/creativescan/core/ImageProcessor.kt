@@ -344,6 +344,41 @@ object ImageProcessor {
         return bmp
     }
 
+    /**
+     * Sharpness of the rectified page: 99.5th-percentile edge strength (the weaker of the horizontal and
+     * vertical directions, so motion blur in one direction is caught) divided by the page contrast.
+     * Sharp text scores about 2.3-2.9; the heavily blurred test photo scored 1.7. Below [BLUR_LIMIT]
+     * the capture is probably too blurry to read.
+     */
+    fun sharpnessScore(src: Bitmap, corners: List<NPoint>): Double {
+        val page = render(src, corners, ProcessSettings(ScanFilter.ORIGINAL, sharpness = 0f, autoStraighten = false), 1200)
+        val rgba = Mat()
+        Utils.bitmapToMat(page, rgba)
+        page.recycle()
+        val gray = Mat()
+        Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
+        rgba.release()
+        Imgproc.GaussianBlur(gray, gray, Size(0.0, 0.0), 1.0)
+        val n = gray.rows() * gray.cols()
+        val px = ByteArray(n); gray.get(0, 0, px)
+        val hist = IntArray(256)
+        for (b in px) hist[b.toInt() and 255]++
+        fun pct(q: Double): Int { var acc = 0; val t = (n * q).toInt(); for (i in 0..255) { acc += hist[i]; if (acc >= t) return i }; return 255 }
+        val contrast = max(1, pct(0.99) - pct(0.01)).toDouble()
+        fun edgeP(dx: Int, dy: Int): Double {
+            val g = Mat(); Imgproc.Sobel(gray, g, CvType.CV_32F, dx, dy, 3)
+            Core.absdiff(g, Scalar(0.0), g)
+            val f = FloatArray(n); g.get(0, 0, f); g.release()
+            f.sort()
+            return f[(n * 0.995).toInt().coerceAtMost(n - 1)].toDouble()
+        }
+        val score = min(edgeP(1, 0), edgeP(0, 1)) / contrast
+        gray.release()
+        return score
+    }
+
+    const val BLUR_LIMIT = 1.9
+
     const val HARD_CAP = 4600
     private const val EDGE_INSET = 0.993
 

@@ -76,6 +76,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var busy by mutableStateOf<String?>(null)
     var message by mutableStateOf<String?>(null)
+    private var lastCaptureBlurry = false
     var exportResult by mutableStateOf<ExportResult?>(null)
     var docName by mutableStateOf(defaultName())
 
@@ -214,9 +215,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             busy = null
+            val blurry = lastCaptureBlurry
             placeCapturedPage(page)
             if (stack.last() == Screen.CAMERA) stack.removeAt(stack.lastIndex)
             if (stack.last() != Screen.EDIT) navigate(Screen.EDIT)
+            if (blurry) message = "This photo looks blurry, so small text may be hard to read. Tap Retake and hold the phone steady."
         }
     }
 
@@ -364,6 +367,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             bmp.recycle()
             return null
         }
+        val pageCorners = det.corners ?: ImageProcessor.defaultCorners()
+        lastCaptureBlurry = !requireDetection && try {
+            ImageProcessor.sharpnessScore(bmp, pageCorners) < ImageProcessor.BLUR_LIMIT
+        } catch (e: Exception) { false }
         val id = UUID.randomUUID().toString()
         val f = File(sessionDir, "$id.jpg")
         ImageIO.saveJpeg(bmp, f, 97)
@@ -371,7 +378,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return ScanPage(
             id = id,
             file = f,
-            corners = det.corners ?: ImageProcessor.defaultCorners(),
+            corners = pageCorners,
             settings = ProcessSettings(filter = settings.defaultFilter)
         )
     }
