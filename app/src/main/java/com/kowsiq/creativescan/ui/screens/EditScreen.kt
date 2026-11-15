@@ -170,7 +170,7 @@ private fun EditContent(vm: AppViewModel, index: Int, page: ScanPage) {
                     if (r != null) {
                         Image(
                             r, contentDescription = "Preview",
-                            modifier = Modifier.fillMaxSize().alpha(if (working) 0.55f else 1f),
+                            modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit
                         )
                     }
@@ -265,9 +265,8 @@ private fun EnhanceControls(
                 label = { Text("Before / After") },
                 leadingIcon = { Icon(Icons.Rounded.Compare, null, Modifier.size(18.dp)) }
             )
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onRevert) { Text("Revert to original") }
         }
+        TextButton(onClick = onRevert) { Text("Revert to original", maxLines = 1, softWrap = false) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Auto-straighten", Modifier.weight(1f))
             Switch(checked = st.autoStraighten, onCheckedChange = { onSettings(st.copy(autoStraighten = it)) })
@@ -382,30 +381,25 @@ private fun CornerEditor(bitmap: Bitmap, corners: List<NPoint>, onChange: (List<
 }
 
 
-/** A thin light bar that sweeps top-to-bottom and back while a filter is being applied (like a scanner head). */
+/** A single thin blue line that moves from top to bottom (and restarts) while a filter is being applied. */
 @Composable
 private fun ScanSweep(modifier: Modifier = Modifier) {
     val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "sweep")
     val y by t.animateFloat(
         initialValue = 0f, targetValue = 1f,
         animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+            animation = androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
         ),
         label = "sweepY"
     )
-    val accent = MaterialTheme.colorScheme.primary
     Canvas(modifier) {
         val cy = size.height * y
-        val glow = 70f
-        drawRect(
-            brush = androidx.compose.ui.graphics.Brush.verticalGradient(
-                listOf(Color.Transparent, accent.copy(alpha = 0.35f), Color.Transparent),
-                startY = cy - glow, endY = cy + glow
-            ),
-            topLeft = androidx.compose.ui.geometry.Offset(0f, cy - glow),
-            size = androidx.compose.ui.geometry.Size(size.width, glow * 2)
+        drawLine(
+            Color(0xFF1E88E5),
+            androidx.compose.ui.geometry.Offset(0f, cy),
+            androidx.compose.ui.geometry.Offset(size.width, cy),
+            strokeWidth = 3f
         )
-        drawLine(accent, androidx.compose.ui.geometry.Offset(0f, cy), androidx.compose.ui.geometry.Offset(size.width, cy), strokeWidth = 4f)
     }
 }
