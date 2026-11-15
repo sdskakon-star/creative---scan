@@ -22,10 +22,13 @@ android {
         targetSdk = 34
         versionCode = 3
         versionName = "1.1.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Android phones use ARM ABIs. Exclude x86_64 emulator binaries from phone APKs;
         // this removes a large OpenCV native library without affecting ARM phones.
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+            // Only the CI emulator tests pass -PwithX86=true; release/phone APKs never include x86_64.
+            if (project.hasProperty("withX86")) abiFilters += "x86_64"
         }
     }
 
@@ -103,4 +106,11 @@ dependencies {
     implementation("org.opencv:opencv:4.9.0")
 
     testImplementation("junit:junit:4.13.2")
+
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
