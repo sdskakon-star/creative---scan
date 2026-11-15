@@ -103,13 +103,13 @@ class PipelineTest {
         for (variant in 0..1) {
             val scene = TestSupport.cardScene(variant)
             TestSupport.save("03_card_scene_$variant", scene.bitmap)
-            val det = ImageProcessor.analyzeFrame(scene.bitmap, 0.06, true, 800)
+            val det = ImageProcessor.analyzeFrame(scene.bitmap, 0.06, true, 800, cardOnly = true)
             assertNotNull("card $variant not detected", det.corners)
             val err = maxCornerError(det.corners!!, scene.corners)
             log("card $variant detection maxErr=$err")
             assertTrue("card $variant corners off by $err", err < 0.03f)
 
-            val s = ProcessSettings(ScanFilter.ENHANCED, sharpness = 0.12f, autoStraighten = false)
+            val s = ProcessSettings(ScanFilter.PHOTO, sharpness = 0.12f, autoStraighten = false)
             val out = ImageProcessor.render(scene.bitmap, scene.corners, s, 1500, IdCardLayout.CARD_ASPECT)
             TestSupport.save("03_card_rectified_$variant", out)
             val aspect = out.width.toDouble() / out.height
@@ -117,7 +117,7 @@ class PipelineTest {
             assertEquals(IdCardLayout.CARD_ASPECT, aspect, 0.03)
 
             val stamp = TestSupport.avgColor(out, (out.width * TestSupport.STAMP_U).toInt(), (out.height * TestSupport.STAMP_V).toInt(), 12)
-            log("card $variant stamp colour after ENHANCED = ${stamp.toList()}")
+            log("card $variant stamp colour after PHOTO = ${stamp.toList()}")
             assertTrue("red stamp lost its colour: ${stamp.toList()}", stamp[0] > 150 && stamp[1] < 110 && stamp[2] < 110)
             val photo = TestSupport.avgColor(out, (out.width * TestSupport.PHOTO_U).toInt(), (out.height * TestSupport.PHOTO_V).toInt(), 20)
             assertTrue("photo area too dark: ${photo.toList()}", photo.min() > 190)

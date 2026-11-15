@@ -237,7 +237,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         var sheet: Bitmap? = null
         try {
             val cardSettings = ProcessSettings(
-                filter = ScanFilter.ENHANCED,
+                filter = ScanFilter.PHOTO, // keeps card colours, stamps and photos natural
                 brightness = 0f,
                 contrast = 1f,
                 sharpness = 0.12f,
@@ -260,8 +260,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             a4Bitmap.eraseColor(Color.WHITE)
             val canvas = Canvas(a4Bitmap)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
-            canvas.drawBitmap(frontImage, null, layout.front.toRectF(), paint)
-            canvas.drawBitmap(backImage, null, layout.back.toRectF(), paint)
+            for ((img, box) in listOf(frontImage to layout.front, backImage to layout.back)) {
+                val bw = (box.right - box.left + 0.5f).toInt()
+                val bh = (box.bottom - box.top + 0.5f).toInt()
+                // Area-averaging downscale keeps small printed text crisp (no aliasing).
+                val fitted = ImageProcessor.resizeArea(img, bw, bh)
+                canvas.drawBitmap(fitted, box.left, box.top, paint)
+                fitted.recycle()
+            }
 
             val id = UUID.randomUUID().toString()
             val output = File(sessionDir, "$id.jpg")
@@ -288,7 +294,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun renderFrontPreview(page: ScanPage): ImageBitmap? {
         val src = ImageIO.decodeFile(page.file, 1400) ?: return null
         return try {
-            val s = ProcessSettings(filter = ScanFilter.ENHANCED, sharpness = 0.12f, autoStraighten = false)
+            val s = ProcessSettings(filter = ScanFilter.PHOTO, sharpness = 0.12f, autoStraighten = false)
             ImageProcessor.render(src, page.corners, s, 700, IdCardLayout.CARD_ASPECT).asImageBitmap()
         } catch (e: Exception) {
             null

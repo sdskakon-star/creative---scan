@@ -243,12 +243,25 @@ object ImageProcessor {
         return listOf(tl, tr, br, bl)
     }
 
-    /** ID-1 cards are 85.6 x 53.98 mm (1.586); 1.30 to 1.85 also tolerates perspective and ID-3 pages. */
+    /** High-quality downscale (area averaging) so small printed text stays crisp. */
+    fun resizeArea(src: Bitmap, width: Int, height: Int): Bitmap {
+        val m = Mat()
+        Utils.bitmapToMat(src, m)
+        val d = Mat()
+        Imgproc.resize(m, d, Size(width.toDouble(), height.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+        m.release()
+        val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        Utils.matToBitmap(d, out)
+        d.release()
+        return out
+    }
+
+    /** ID-1 cards are 85.6 x 53.98 mm (1.586); 1.25 to 1.95 also tolerates perspective and ID-3 pages. */
     private fun isCardShaped(p: List<Point>): Boolean {
         val w = (dist(p[0], p[1]) + dist(p[3], p[2])) / 2
         val h = (dist(p[0], p[3]) + dist(p[1], p[2])) / 2
         if (w < 1 || h < 1) return false
-        return max(w, h) / min(w, h) in 1.30..1.85
+        return max(w, h) / min(w, h) in 1.25..1.95
     }
 
     private fun hullToQuad(contour: MatOfPoint): List<Point>? {
