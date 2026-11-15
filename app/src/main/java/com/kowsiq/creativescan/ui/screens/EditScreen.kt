@@ -3,6 +3,7 @@ package com.kowsiq.creativescan.ui.screens
 import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.horizontalDrag
@@ -322,11 +323,11 @@ private fun HandleOnlySlider(
             .pointerInput(range) {
                 val pad = 14.dp.toPx()
                 val grab = 28.dp.toPx()
-                androidx.compose.foundation.gestures.forEachGesture { awaitPointerEventScope {
+                awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val usable = (size.width - 2 * pad).coerceAtLeast(1f)
                     val thumbX = pad + (current - range.start) / (range.endInclusive - range.start) * usable
-                    if (kotlin.math.abs(down.position.x - thumbX) > grab) return@awaitPointerEventScope
+                    if (kotlin.math.abs(down.position.x - thumbX) > grab) return@awaitEachGesture
                     val slop = awaitHorizontalTouchSlopOrCancellation(down.id) { c, _ -> c.consume() }
                     if (slop != null) {
                         horizontalDrag(down.id) { c ->
@@ -335,7 +336,7 @@ private fun HandleOnlySlider(
                             change(range.start + f * (range.endInclusive - range.start))
                         }
                     }
-                } }
+                }
             }
     ) {
         val pad = 14.dp.toPx()
