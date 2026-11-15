@@ -237,10 +237,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         var sheet: Bitmap? = null
         try {
             val cardSettings = ProcessSettings(
-                filter = ScanFilter.PHOTO, // keeps card colours, stamps and photos natural
+                // Colours of an ID must stay exactly as printed: no white balance, no whitening.
+                filter = ScanFilter.ORIGINAL,
                 brightness = 0f,
-                contrast = 1f,
-                sharpness = 0.12f,
+                contrast = 1.04f,
+                sharpness = 0.15f,
                 autoStraighten = false
             )
             val frontImage0 = ImageProcessor.render(frontSource, front.corners, cardSettings, 1500, IdCardLayout.CARD_ASPECT)
@@ -294,7 +295,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun renderFrontPreview(page: ScanPage): ImageBitmap? {
         val src = ImageIO.decodeFile(page.file, 1400) ?: return null
         return try {
-            val s = ProcessSettings(filter = ScanFilter.PHOTO, sharpness = 0.12f, autoStraighten = false)
+            val s = ProcessSettings(filter = ScanFilter.ORIGINAL, contrast = 1.04f, sharpness = 0.15f, autoStraighten = false)
             ImageProcessor.render(src, page.corners, s, 700, IdCardLayout.CARD_ASPECT).asImageBitmap()
         } catch (e: Exception) {
             null
