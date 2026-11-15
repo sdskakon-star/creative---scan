@@ -219,13 +219,17 @@ private fun EnhanceControls(
         Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(ScanFilter.values().toList()) { f ->
-                FilterChip(
-                    selected = st.filter == f,
-                    onClick = { onSettings(st.copy(filter = f)) },
-                    label = { Text(f.label) }
-                )
+        // All filters visible at once (no sideways scrolling): two rows of three.
+        ScanFilter.values().toList().chunked(3).forEach { rowFilters ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowFilters.forEach { f ->
+                    FilterChip(
+                        modifier = Modifier.weight(1f),
+                        selected = st.filter == f,
+                        onClick = { onSettings(st.copy(filter = f)) },
+                        label = { Text(f.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) }
+                    )
+                }
             }
         }
         LabeledSlider("Brightness", st.brightness, -100f..100f, "${st.brightness.toInt()}") {
