@@ -381,6 +381,7 @@ object ImageProcessor {
 
     const val HARD_CAP = 4600
     private const val EDGE_INSET = 0.993
+    private const val FOLD_THRESHOLD = 18.0
 
     private fun warp(src: Mat, corners: List<NPoint>, maxSide: Int, targetAspectRatio: Double? = null): Mat {
         val w = src.cols().toDouble()
@@ -496,7 +497,7 @@ object ImageProcessor {
         rgb.release()
         val ch = ArrayList<Mat>()
         Core.split(lab, ch)
-        val norm = normalizeLuminance(ch[0], 1.0)
+        val norm = normalizeLuminance(ch[0], 1.0, ch[1], ch[2])
         val eq = clahe(norm, 1.2)
         norm.release()
         // Levels: paper to white (also wipes faint creases and shadow remnants), text stays dark.
@@ -516,9 +517,10 @@ object ImageProcessor {
     private fun filterGrayscale(rgb: Mat): Mat {
         val gray = Mat()
         Imgproc.cvtColor(rgb, gray, Imgproc.COLOR_RGB2GRAY)
+        val (ca, cb) = chromaOf(rgb)
         rgb.release()
-        val norm = normalizeLuminance(gray, 0.9)
-        gray.release()
+        val norm = normalizeLuminance(gray, 0.9, ca, cb)
+        gray.release(); ca.release(); cb.release()
         val eq = clahe(norm, 1.3)
         norm.release()
         val out = Mat()
@@ -530,17 +532,27 @@ object ImageProcessor {
     private fun filterBlackWhite(rgb: Mat, s: ProcessSettings): Mat {
         val gray = Mat()
         Imgproc.cvtColor(rgb, gray, Imgproc.COLOR_RGB2GRAY)
+        val (ca, cb) = chromaOf(rgb)
         rgb.release()
         adjustBrightnessContrast(gray, s.brightness, s.contrast)
-        Imgproc.GaussianBlur(gray, gray, Size(3.0, 3.0), 0.0)
-        val norm = normalizeLuminance(gray, 1.0)
-        gray.release()
-        // After illumination normalisation the paper sits near 245, so a fixed cut-off keeps text
-        // (dark) and drops creases/shadow remnants (only slightly darker than paper). A local
-        // adaptive threshold would turn every thin crease into a black line.
-        val bin = Mat()
-        Imgproc.threshold(norm, bin, 175.0, 255.0, Imgproc.THRESH_BINARY)
-        norm.release()
+        Imgproc.GaussianBlur(gray, gray, Size(), 0.8)
+        val norm = normalizeLuminance(gray, 1.0, ca, cb)
+        gray.release(); ca.release(); cb.release()
+        // After normalisation the paper sits near 245. Black = clearly dark (< 150), or a thin stroke that is
+        // darker than its surroundings (keeps small, light text) but still not as light as a crease.
+        val sigma = max(3.0, min(norm.rows(), norm.cols()) / 230.0)
+        val loc = Mat(); Imgproc.GaussianBlur(norm, loc, Size(), sigma)
+        loc.convertTo(loc, CvType.CV_32F)
+        Core.subtract(loc, Scalar(20.0), loc)
+        val n32 = Mat(); norm.convertTo(n32, CvType.CV_32F)
+        val darker = Mat(); Core.compare(n32, loc, darker, Core.CMP_LT)
+        loc.release(); n32.release()
+        val under200 = Mat(); Core.inRange(norm, Scalar(0.0), Scalar(199.0), under200)
+        Core.bitwise_and(darker, under200, darker)
+        val strong = Mat(); Core.inRange(norm, Scalar(0.0), Scalar(149.0), strong)
+        Core.bitwise_or(darker, strong, darker)
+        norm.release(); under200.release(); strong.release()
+        val bin = Mat(); Core.bitwise_not(darker, bin); darker.release()
         val out = Mat()
         Imgproc.cvtColor(bin, out, Imgproc.COLOR_GRAY2RGB)
         bin.release()
@@ -554,7 +566,7 @@ object ImageProcessor {
         rgb.release()
         val ch = ArrayList<Mat>()
         Core.split(lab, ch)
-        val norm = normalizeLuminance(ch[0], 1.0)
+        val norm = normalizeLuminance(ch[0], 1.0, ch[1], ch[2])
         // Levels: push paper to white, keep soft anti-aliased strokes.
         val leveled = Mat()
         norm.convertTo(leveled, -1, 255.0 / 165.0, -35.0 * 255.0 / 165.0)
@@ -595,13 +607,124 @@ object ImageProcessor {
      * then divides the luminance by it. The background is floored so dark photographs
      * are not blown out.
      */
-    private fun normalizeLuminance(l: Mat, strength: Double): Mat {
-        val bg = estimateBackground(l)
-        val l32 = Mat(); val bg32 = Mat()
-        l.convertTo(l32, CvType.CV_32F)
-        bg.convertTo(bg32, CvType.CV_32F)
-        bg.release()
-        Core.max(bg32, Scalar(backgroundFloor(bg32)), bg32)
+    /** Coarse (about 400 px) model of the page used to separate paper (shadows, folds) from printed pictures. */
+    private class PageModel(val f: Double, val ls: Mat, val bg0: Mat, val dist: Mat, val p95: Float) {
+        fun release() { ls.release(); bg0.release(); dist.release() }
+    }
+
+    private fun percentile(values: FloatArray, q: Double): Float {
+        val c = values.copyOf(); c.sort(); return c[(c.size * q).toInt().coerceIn(0, c.size - 1)]
+    }
+
+    private fun buildPageModel(l: Mat, a: Mat, b: Mat): PageModel {
+        val f = min(1.0, 400.0 / max(l.cols(), l.rows()))
+        val ls = Mat(); Imgproc.resize(l, ls, Size(), f, f, Imgproc.INTER_AREA)
+        val bg0 = Mat()
+        Imgproc.morphologyEx(ls, bg0, Imgproc.MORPH_CLOSE, Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(25.0, 25.0)))
+        bg0.convertTo(bg0, CvType.CV_32F)
+        Imgproc.GaussianBlur(bg0, bg0, Size(), 3.0)
+        fun chroma(src: Mat): Mat {
+            val sm = Mat(); Imgproc.resize(src, sm, ls.size(), 0.0, 0.0, Imgproc.INTER_AREA)
+            sm.convertTo(sm, CvType.CV_32F)
+            Imgproc.GaussianBlur(sm, sm, Size(), 2.0)
+            Core.subtract(sm, Scalar(128.0), sm)
+            return sm
+        }
+        val aS = chroma(a); val bS = chroma(b)
+        val n = ls.rows() * ls.cols()
+        val lsB = ByteArray(n); ls.get(0, 0, lsB)
+        val aF = FloatArray(n); aS.get(0, 0, aF)
+        val bF = FloatArray(n); bS.get(0, 0, bF)
+        val lv = FloatArray(n) { (lsB[it].toInt() and 255).toFloat() }
+        val p70 = percentile(lv, 0.70)
+        val pa = ArrayList<Float>(); val pb = ArrayList<Float>()
+        for (i in 0 until n) if (lv[i] >= p70) { pa.add(aF[i]); pb.add(bF[i]) }
+        pa.sort(); pb.sort()
+        val ma = pa[pa.size / 2]; val mb = pb[pb.size / 2]
+        val d = FloatArray(n) { val x = aF[it] - ma; val y = bF[it] - mb; sqrt(x * x + y * y) }
+        val dist = Mat(ls.rows(), ls.cols(), CvType.CV_32F); dist.put(0, 0, d)
+        aS.release(); bS.release()
+        val bgF = FloatArray(n); bg0.get(0, 0, bgF)
+        return PageModel(f, ls, bg0, dist, percentile(bgF, 0.95))
+    }
+
+    /** Lifts long, soft, neutral dark bands (paper folds) so they do not survive as dark stripes. */
+    private fun repairFolds(l: Mat, m: PageModel) {
+        val ls32 = Mat(); m.ls.convertTo(ls32, CvType.CV_32F)
+        val dark = Mat(); Core.subtract(m.bg0, ls32, dark); ls32.release()
+        Core.max(dark, Scalar(0.0), dark)
+        val neutral = Mat(); Imgproc.threshold(m.dist, neutral, 9.0, 1.0, Imgproc.THRESH_BINARY_INV)
+        Core.multiply(dark, neutral, dark); neutral.release()
+        Imgproc.GaussianBlur(dark, dark, Size(), 1.2)
+        val w = dark.cols(); val h = dark.rows()
+        val lenH = max(15, (w * 0.28).toInt()); val lenV = max(15, (h * 0.28).toInt())
+        fun opened(kw: Int, kh: Int): Mat {
+            val o = Mat()
+            Imgproc.morphologyEx(dark, o, Imgproc.MORPH_OPEN, Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(kw.toDouble(), kh.toDouble())))
+            return o
+        }
+        // thin soft bands survive the 5 px opening but not the 15 px one (thick dark areas are content, not folds)
+        val hThin = opened(lenH, 5); val hThick = opened(lenH, 15)
+        val vThin = opened(5, lenV); val vThick = opened(15, lenV)
+        Core.subtract(hThin, hThick, hThin); Core.max(hThin, Scalar(0.0), hThin)
+        Core.subtract(vThin, vThick, vThin); Core.max(vThin, Scalar(0.0), vThin)
+        val fm = Mat(); Core.max(hThin, vThin, fm)
+        hThin.release(); hThick.release(); vThin.release(); vThick.release(); dark.release()
+        Imgproc.GaussianBlur(fm, fm, Size(), 2.5)
+        val full = Mat(); Imgproc.resize(fm, full, l.size(), 0.0, 0.0, Imgproc.INTER_LINEAR); fm.release()
+        Core.subtract(full, Scalar(FOLD_THRESHOLD), full)
+        Core.max(full, Scalar(0.0), full)
+        Core.multiply(full, Scalar(1.15), full)
+        val l32 = Mat(); l.convertTo(l32, CvType.CV_32F)
+        Core.add(l32, full, l32); full.release()
+        l32.convertTo(l, CvType.CV_8U); l32.release()
+    }
+
+    /**
+     * Estimates how brightly the PAPER is lit at every pixel. Printed pictures (coloured, so different
+     * from the paper tint) are not treated as shadow: their value is interpolated from the surrounding paper.
+     */
+    private fun illumination(l: Mat, m: PageModel): Mat {
+        val n = m.ls.rows() * m.ls.cols()
+        val bgF = FloatArray(n); m.bg0.get(0, 0, bgF)
+        val dF = FloatArray(n); m.dist.get(0, 0, dF)
+        val non = Mat(m.ls.rows(), m.ls.cols(), CvType.CV_8U)
+        val nonB = ByteArray(n) { if (dF[it] > 9.0f || bgF[it] < 0.40f * m.p95) 1 else 0 }
+        non.put(0, 0, nonB)
+        Imgproc.dilate(non, non, Mat.ones(5, 5, CvType.CV_8U))
+        non.get(0, 0, nonB); non.release()
+        val wF = FloatArray(n) { if (nonB[it].toInt() == 0) 1f else 0f }
+        val out = bgF.copyOf()
+        val filled = BooleanArray(n) { wF[it] > 0.5f }
+        val num0 = FloatArray(n) { bgF[it] * wF[it] }
+        for (sg in doubleArrayOf(6.0, 14.0, 32.0, 80.0)) {
+            val numM = Mat(m.ls.rows(), m.ls.cols(), CvType.CV_32F); numM.put(0, 0, num0)
+            val denM = Mat(m.ls.rows(), m.ls.cols(), CvType.CV_32F); denM.put(0, 0, wF)
+            Imgproc.GaussianBlur(numM, numM, Size(), sg); Imgproc.GaussianBlur(denM, denM, Size(), sg)
+            val nu = FloatArray(n); numM.get(0, 0, nu); val de = FloatArray(n); denM.get(0, 0, de)
+            numM.release(); denM.release()
+            for (i in 0 until n) if (!filled[i] && de[i] > 0.03f) { out[i] = nu[i] / de[i]; filled[i] = true }
+        }
+        val med = percentile(bgF, 0.5)
+        for (i in 0 until n) if (!filled[i]) out[i] = med
+        val small = Mat(m.ls.rows(), m.ls.cols(), CvType.CV_32F); small.put(0, 0, out)
+        Imgproc.GaussianBlur(small, small, Size(), 6.0)
+        val full = Mat(); Imgproc.resize(small, full, l.size(), 0.0, 0.0, Imgproc.INTER_LINEAR); small.release()
+        val floorV = max(60.0, 0.45 * percentile(out, 0.95))
+        Core.max(full, Scalar(floorV), full)
+        return full
+    }
+
+    /**
+     * Removes uneven lighting and fold shadows from a luminance channel. [a]/[b] are the Lab chroma
+     * channels of the same image (used to tell paper from coloured print).
+     */
+    private fun normalizeLuminance(l: Mat, strength: Double, a: Mat, b: Mat): Mat {
+        val model = buildPageModel(l, a, b)
+        repairFolds(l, model)
+        val bg32 = illumination(l, model)
+        model.release()
+        val l32 = Mat(); l.convertTo(l32, CvType.CV_32F)
         val res32 = Mat()
         Core.divide(l32, bg32, res32, 245.0)
         l32.release(); bg32.release()
@@ -614,25 +737,12 @@ object ImageProcessor {
         return out
     }
 
-    /** Floor for the background estimate: protects dark photos but still lifts a dimly lit page. */
-    private fun backgroundFloor(bg32: Mat): Double {
-        val small = Mat(); Imgproc.resize(bg32, small, Size(48.0, 48.0), 0.0, 0.0, Imgproc.INTER_AREA)
-        val v = FloatArray(48 * 48); small.get(0, 0, v); small.release()
-        v.sort()
-        return (v[(v.size * 0.95).toInt()] * 0.6).toDouble().coerceIn(60.0, 150.0)
-    }
-
-    private fun estimateBackground(gray: Mat): Mat {
-        val f = min(1.0, 400.0 / max(gray.cols(), gray.rows()))
-        val small = Mat()
-        Imgproc.resize(gray, small, Size(), f, f, Imgproc.INTER_AREA)
-        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(9.0, 9.0))
-        Imgproc.morphologyEx(small, small, Imgproc.MORPH_CLOSE, kernel)
-        Imgproc.GaussianBlur(small, small, Size(15.0, 15.0), 0.0)
-        val bg = Mat()
-        Imgproc.resize(small, bg, gray.size(), 0.0, 0.0, Imgproc.INTER_LINEAR)
-        small.release()
-        return bg
+    /** Lab a/b channels of an RGB image. */
+    private fun chromaOf(rgb: Mat): Pair<Mat, Mat> {
+        val lab = Mat(); Imgproc.cvtColor(rgb, lab, Imgproc.COLOR_RGB2Lab)
+        val ch = ArrayList<Mat>(); Core.split(lab, ch); lab.release()
+        ch[0].release()
+        return Pair(ch[1], ch[2])
     }
 
     private fun clahe(l: Mat, clip: Double): Mat {
