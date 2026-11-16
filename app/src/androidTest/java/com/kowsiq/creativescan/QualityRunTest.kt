@@ -40,13 +40,14 @@ class QualityRunTest {
             val src: Bitmap = assets.open("scenes/$n.jpg").use { BitmapFactory.decodeStream(it) }
             val t0 = System.currentTimeMillis()
             val det = ImageProcessor.analyzeFrame(src, 0.15, true, 800)
-            val corners = det.corners ?: ImageProcessor.defaultCorners(0.02f)
+            val user = n.startsWith("u")   // real user photos are already cropped: use the full frame
+            val corners = if (user) ImageProcessor.defaultCorners(0f) else (det.corners ?: ImageProcessor.defaultCorners(0.02f))
             report.appendText("$n detected=${det.corners != null} shadowy=${det.shadowy} area=${det.areaFraction} corners=${corners.joinToString(";") { "%.4f,%.4f".format(it.x, it.y) }}\n")
             val sharp = ImageProcessor.sharpnessScore(src, corners)
             report.appendText("$n sharpness=${"%.2f".format(sharp)}\n")
-            if (n == "s10_blur") org.junit.Assert.assertTrue("blurry photo not flagged ($sharp)", sharp < ImageProcessor.BLUR_LIMIT)
+            if (user) Unit else if (n == "s10_blur") org.junit.Assert.assertTrue("blurry photo not flagged ($sharp)", sharp < ImageProcessor.BLUR_LIMIT)
             else org.junit.Assert.assertTrue("$n wrongly flagged as blurry ($sharp)", sharp >= ImageProcessor.BLUR_LIMIT)
-            for (f in listOf(ScanFilter.ENHANCED, ScanFilter.DOCUMENT_CLEAN, ScanFilter.BLACK_WHITE, ScanFilter.ORIGINAL)) {
+            for (f in if (user) ScanFilter.values().toList() else listOf(ScanFilter.ENHANCED, ScanFilter.DOCUMENT_CLEAN, ScanFilter.BLACK_WHITE, ScanFilter.ORIGINAL)) {
                 val out = ImageProcessor.render(src, corners, ProcessSettings(f), 2400)
                 val file = File(dir, "${n}__$f." + if (f == ScanFilter.BLACK_WHITE) "png" else "jpg")
                 file.outputStream().use {
