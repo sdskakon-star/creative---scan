@@ -674,7 +674,7 @@ object ImageProcessor {
         val full = Mat(); Imgproc.resize(fm, full, l.size(), 0.0, 0.0, Imgproc.INTER_LINEAR); fm.release()
         Core.subtract(full, Scalar(FOLD_THRESHOLD), full)
         Core.max(full, Scalar(0.0), full)
-        Core.multiply(full, Scalar(1.15), full)
+        Core.multiply(full, Scalar(1.8), full)
         val l32 = Mat(); l.convertTo(l32, CvType.CV_32F)
         Core.add(l32, full, l32); full.release()
         l32.convertTo(l, CvType.CV_8U); l32.release()
