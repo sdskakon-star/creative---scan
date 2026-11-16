@@ -689,7 +689,7 @@ object ImageProcessor {
         val bgF = FloatArray(n); m.bg0.get(0, 0, bgF)
         val dF = FloatArray(n); m.dist.get(0, 0, dF)
         val non = Mat(m.ls.rows(), m.ls.cols(), CvType.CV_8U)
-        val nonB = ByteArray(n) { if (dF[it] > 9.0f || bgF[it] < 0.40f * m.p95) 1 else 0 }
+        val nonB = ByteArray(n) { if (dF[it] > 9.0f || bgF[it] < 0.25f * m.p95) 1 else 0 }
         non.put(0, 0, nonB)
         Imgproc.dilate(non, non, Mat.ones(5, 5, CvType.CV_8U))
         non.get(0, 0, nonB); non.release()
