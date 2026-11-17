@@ -3,9 +3,10 @@
 Native Android document scanner. Kotlin, Jetpack Compose (Material 3), CameraX, OpenCV 4.9, MVVM.
 Package: `com.kowsiq.creativescan` · minSdk 26 (Android 8.0) · targetSdk 34 · fully offline (no INTERNET permission).
 
-> **Build status:** the source was written but **has not been compiled yet**, because the authoring
-> environment had no Android SDK and no access to Maven/Google servers. Build it once on your PC
-> (steps below). If the build prints errors, send them back and they can be fixed quickly.
+> **Build status:** every push is built by GitHub Actions (Build APK -> release `build-N`), unit-tested, and
+> run on an Android 14 emulator (document pipeline, ID A4 sheet, PDF/JPEG export, 30 x 12 MP stress test,
+> blur check, real leaflet photo). Real phone-camera behaviour (focus, torch, auto-capture) is not covered by
+> those tests, so try a few real documents on your phone.
 
 ## Build on Windows (Android Studio — easiest)
 
