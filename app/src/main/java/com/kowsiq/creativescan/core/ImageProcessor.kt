@@ -652,6 +652,71 @@ object ImageProcessor {
         return PageModel(f, ls, bg0, dist, percentile(bgF, 0.95))
     }
 
+    /**
+     * Fold shadows darken a whole strip of the page, printed pictures included. The brightness of the plain
+     * paper along every row (and column) is measured; a narrow dip compared with its surroundings is a
+     * fold shadow, and that row/column is brightened by the same factor across the full width.
+     */
+    private fun foldShadowGain(l: Mat, m: PageModel) {
+        val w = m.ls.cols(); val h = m.ls.rows(); val n = w * h
+        val lsB = ByteArray(n); m.ls.get(0, 0, lsB)
+        val dF = FloatArray(n); m.dist.get(0, 0, dF)
+        val lv = FloatArray(n) { (lsB[it].toInt() and 255).toFloat() }
+        val lim = 0.5f * percentile(lv, 0.95)
+        val paper = BooleanArray(n) { dF[it] < 7f && lv[it] > lim }
+
+        fun gains(len: Int, other: Int, at: (Int, Int) -> Int): FloatArray {
+            val prof = FloatArray(len) { Float.NaN }
+            val tmp = FloatArray(other)
+            for (i in 0 until len) {
+                var c = 0
+                for (j in 0 until other) { val k = at(i, j); if (paper[k]) tmp[c++] = lv[k] }
+                if (c >= max(3, (0.06 * other).toInt())) { val sub = tmp.copyOf(c); sub.sort(); prof[i] = sub[c / 2] }
+            }
+            var first = -1
+            for (i in 0 until len) if (!prof[i].isNaN()) { first = i; break }
+            if (first < 0) return FloatArray(len) { 1f }
+            var last = first
+            for (i in 0 until len) if (!prof[i].isNaN()) {
+                if (i - last > 1) for (q in last + 1 until i) prof[q] = prof[last] + (prof[i] - prof[last]) * (q - last) / (i - last).toFloat()
+                last = i
+            }
+            for (i in 0 until first) prof[i] = prof[first]
+            for (i in last + 1 until len) prof[i] = prof[last]
+            fun smooth(a: FloatArray): FloatArray = FloatArray(len) { i ->
+                (a[max(i - 1, 0)] + 2 * a[i] + a[min(i + 1, len - 1)]) / 4f
+            }
+            val pf = smooth(prof)
+            val win = max(5, (len * 0.14).toInt()) or 1
+            val half = win / 2
+            val base = FloatArray(len) { i ->
+                val lo = max(0, i - half); val hi = min(len - 1, i + half)
+                val sub = pf.copyOfRange(lo, hi + 1); sub.sort(); sub[sub.size / 2]
+            }
+            var g = FloatArray(len) { i ->
+                val r = (base[i] / max(pf[i], 1f)).coerceIn(1f, 1.7f)
+                if (r < 1.04f) 1f else r
+            }
+            g = smooth(smooth(g))
+            return g
+        }
+        val gy = gains(h, w) { i, j -> i * w + j }
+        val gx = gains(w, h) { i, j -> j * w + i }
+        if (gy.all { it == 1f } && gx.all { it == 1f }) return
+
+        val gyM = Mat(h, 1, CvType.CV_32F); gyM.put(0, 0, gy)
+        val gxM = Mat(1, w, CvType.CV_32F); gxM.put(0, 0, gx)
+        val gyBig = Mat(); Imgproc.resize(gyM, gyBig, Size(1.0, l.rows().toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
+        val gxBig = Mat(); Imgproc.resize(gxM, gxBig, Size(l.cols().toDouble(), 1.0), 0.0, 0.0, Imgproc.INTER_LINEAR)
+        gyM.release(); gxM.release()
+        val gyRep = Mat(); Core.repeat(gyBig, 1, l.cols(), gyRep); gyBig.release()
+        val gxRep = Mat(); Core.repeat(gxBig, l.rows(), 1, gxRep); gxBig.release()
+        val l32 = Mat(); l.convertTo(l32, CvType.CV_32F)
+        Core.multiply(l32, gyRep, l32); gyRep.release()
+        Core.multiply(l32, gxRep, l32); gxRep.release()
+        l32.convertTo(l, CvType.CV_8U); l32.release()
+    }
+
     /** Lifts long, soft, neutral dark bands (paper folds) so they do not survive as dark stripes. */
     private fun repairFolds(l: Mat, m: PageModel) {
         val ls32 = Mat(); m.ls.convertTo(ls32, CvType.CV_32F)
@@ -725,6 +790,7 @@ object ImageProcessor {
      */
     private fun normalizeLuminance(l: Mat, strength: Double, a: Mat, b: Mat): Mat {
         val model = buildPageModel(l, a, b)
+        foldShadowGain(l, model)
         repairFolds(l, model)
         val bg32 = illumination(l, model)
         model.release()
