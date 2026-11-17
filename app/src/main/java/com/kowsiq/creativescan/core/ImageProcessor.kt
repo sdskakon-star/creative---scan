@@ -345,10 +345,12 @@ object ImageProcessor {
     }
 
     /**
-     * Sharpness of the rectified page: 99.5th-percentile edge strength (the weaker of the horizontal and
-     * vertical directions, so motion blur in one direction is caught) divided by the page contrast.
-     * Sharp text scores about 2.3-2.9; the heavily blurred test photo scored 1.7. Below [BLUR_LIMIT]
-     * the capture is probably too blurry to read.
+     * Sharpness of the rectified page, independent of how contrasty or colourful the print is:
+     * the 99.5th-percentile edge strength after a light blur (sigma 1) divided by the same after a
+     * stronger blur (sigma 3). Real sharp edges lose a lot of gradient when blurred more (ratio ~3);
+     * edges that are already smeared barely change (ratio ~2). The weaker of the horizontal and
+     * vertical directions counts, so motion blur in one direction is caught.
+     * Measured: sharp text/leaflet photos 2.45-3.4, the heavily blurred test photo 1.99.
      */
     fun sharpnessScore(src: Bitmap, corners: List<NPoint>): Double {
         val page = render(src, corners, ProcessSettings(ScanFilter.ORIGINAL, sharpness = 0f, autoStraighten = false), 1200)
@@ -358,26 +360,23 @@ object ImageProcessor {
         val gray = Mat()
         Imgproc.cvtColor(rgba, gray, Imgproc.COLOR_RGBA2GRAY)
         rgba.release()
-        Imgproc.GaussianBlur(gray, gray, Size(0.0, 0.0), 1.0)
         val n = gray.rows() * gray.cols()
-        val px = ByteArray(n); gray.get(0, 0, px)
-        val hist = IntArray(256)
-        for (b in px) hist[b.toInt() and 255]++
-        fun pct(q: Double): Int { var acc = 0; val t = (n * q).toInt(); for (i in 0..255) { acc += hist[i]; if (acc >= t) return i }; return 255 }
-        val contrast = max(1, pct(0.99) - pct(0.01)).toDouble()
-        fun edgeP(dx: Int, dy: Int): Double {
-            val g = Mat(); Imgproc.Sobel(gray, g, CvType.CV_32F, dx, dy, 3)
+        fun edgeP(sigma: Double, dx: Int, dy: Int): Double {
+            val b = Mat(); Imgproc.GaussianBlur(gray, b, Size(0.0, 0.0), sigma)
+            val g = Mat(); Imgproc.Sobel(b, g, CvType.CV_32F, dx, dy, 3)
+            b.release()
             Core.absdiff(g, Scalar(0.0), g)
             val f = FloatArray(n); g.get(0, 0, f); g.release()
             f.sort()
             return f[(n * 0.995).toInt().coerceAtMost(n - 1)].toDouble()
         }
-        val score = min(edgeP(1, 0), edgeP(0, 1)) / contrast
+        val rx = edgeP(1.0, 1, 0) / max(edgeP(3.0, 1, 0), 1e-3)
+        val ry = edgeP(1.0, 0, 1) / max(edgeP(3.0, 0, 1), 1e-3)
         gray.release()
-        return score
+        return min(rx, ry)
     }
 
-    const val BLUR_LIMIT = 1.9
+    const val BLUR_LIMIT = 2.25
 
     const val HARD_CAP = 4600
     private const val EDGE_INSET = 0.993
@@ -567,10 +566,15 @@ object ImageProcessor {
         val ch = ArrayList<Mat>()
         Core.split(lab, ch)
         val norm = normalizeLuminance(ch[0], 1.0, ch[1], ch[2])
-        // Levels: push paper to white, keep soft anti-aliased strokes.
+        // Levels + ink curve: paper to white, light ink (e.g. brown print) pulled clearly darker, soft strokes kept.
+        val lut = Mat(1, 256, CvType.CV_8U)
+        for (i in 0..255) {
+            val t = ((i - 45.0) / (205.0 - 45.0)).coerceIn(0.0, 1.0)
+            lut.put(0, i, byteArrayOf((255.0 * Math.pow(t, 1.7)).roundToInt().coerceIn(0, 255).toByte()))
+        }
         val leveled = Mat()
-        norm.convertTo(leveled, -1, 255.0 / 165.0, -35.0 * 255.0 / 165.0)
-        norm.release()
+        Core.LUT(norm, lut, leveled)
+        lut.release(); norm.release()
         leveled.copyTo(ch[0]); leveled.release()
         // Remove paper tint only where chroma is tiny; coloured stamps/ink keep their colour.
         neutralizePaper(ch, 200.0, 12.0)
@@ -583,7 +587,7 @@ object ImageProcessor {
     }
 
     private fun filterPhoto(rgb: Mat): Mat {
-        whiteBalance(rgb, 1.08)
+        paperWhiteBalance(rgb, 1.25, 0.7)
         val lab = Mat()
         Imgproc.cvtColor(rgb, lab, Imgproc.COLOR_RGB2Lab)
         rgb.release()
@@ -753,6 +757,38 @@ object ImageProcessor {
     }
 
     /** Gray-world white balance with limited gain, in place. */
+    /**
+     * Gentle white balance from the brightest part of the page (the paper): removes a warm/cool light cast
+     * without turning a coloured print blue the way a grey-world balance does on a one-colour page.
+     */
+    private fun paperWhiteBalance(rgb: Mat, maxGain: Double, strength: Double) {
+        val small = Mat(); Imgproc.resize(rgb, small, Size(), 0.25, 0.25, Imgproc.INTER_AREA)
+        val g = Mat(); Imgproc.cvtColor(small, g, Imgproc.COLOR_RGB2GRAY)
+        val n = g.rows() * g.cols()
+        val gb = ByteArray(n); g.get(0, 0, gb)
+        val lv = FloatArray(n) { (gb[it].toInt() and 255).toFloat() }
+        val thr = percentile(lv, 0.75).toInt()
+        val sum = DoubleArray(3); var cnt = 0
+        val px = ByteArray(n * 3); small.get(0, 0, px)
+        for (i in 0 until n) if ((gb[i].toInt() and 255) >= thr) {
+            for (c in 0 until 3) sum[c] += (px[i * 3 + c].toInt() and 255).toDouble()
+            cnt++
+        }
+        small.release(); g.release()
+        if (cnt == 0) return
+        val mean = DoubleArray(3) { sum[it] / cnt }
+        val target = (mean[0] + mean[1] + mean[2]) / 3.0
+        val ch = ArrayList<Mat>()
+        Core.split(rgb, ch)
+        for (i in 0 until 3) {
+            val full = (target / max(mean[i], 1.0)).coerceIn(1.0 / maxGain, maxGain)
+            val gain = 1.0 + (full - 1.0) * strength
+            ch[i].convertTo(ch[i], -1, gain, 0.0)
+        }
+        Core.merge(ch, rgb)
+        ch.forEach { it.release() }
+    }
+
     private fun whiteBalance(rgb: Mat, maxGain: Double) {
         val mean = Core.mean(rgb).`val`
         val target = (mean[0] + mean[1] + mean[2]) / 3.0
