@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,6 +46,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material.icons.rounded.FlashOn
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -388,29 +391,34 @@ fun CameraScreen(vm: AppViewModel) {
                         )
                     }
                     if (vm.idCardAwaitingBack) {
+                        // Compact and scrollable, so the instruction and both buttons are always reachable.
                         Column(
-                            Modifier.fillMaxSize().background(Color(0xE6000000)).padding(20.dp),
+                            Modifier.fillMaxSize().background(Color(0xF2000000))
+                                .verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
                             Text("Front side captured ✓", color = Color.White, style = MaterialTheme.typography.titleMedium)
                             vm.idCardFrontPreview?.let {
-                                Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.height(8.dp))
                                 Image(
                                     it, "Front side preview",
-                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)),
-                                    contentScale = ContentScale.FillWidth
+                                    Modifier.fillMaxWidth(0.62f).heightIn(max = 130.dp).clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Fit
                                 )
                             }
-                            Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(10.dp))
                             Text(
-                                "Now turn the card over and place the BACK side flat inside the frame, then tap the button below.",
-                                color = Color.White
+                                "Now turn the card over and place the BACK side flat inside the frame. " +
+                                    "When you are ready, tap \"Scan back side\".",
+                                color = Color.White, style = MaterialTheme.typography.bodyMedium
                             )
-                            Spacer(Modifier.height(16.dp))
-                            Button(onClick = { vm.beginBackCapture() }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Scan back side")
-                            }
+                            Spacer(Modifier.height(12.dp))
+                            Button(
+                                onClick = { vm.beginBackCapture() },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.White)
+                            ) { Text("Scan back side") }
                             OutlinedButton(onClick = { vm.retakeIdCardFront() }, modifier = Modifier.fillMaxWidth()) {
                                 Text("Retake front", color = Color.White)
                             }
