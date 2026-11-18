@@ -15,7 +15,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import com.kowsiq.creativescan.TestSupport.log
+import androidx.lifecycle.ViewModelProvider
+import com.kowsiq.creativescan.ui.AppViewModel
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import java.io.File
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.RuleChain
@@ -93,5 +97,47 @@ class UiSmokeTest {
         assertTrue(compose.activityRule.scenario.state.isAtLeast(Lifecycle.State.STARTED))
         back()
         compose.onAllNodesWithText("Scan Document")
+    }
+
+    /** The real screens: after the front side the app must stop, explain, and wait for the user's tap. */
+    @Test
+    fun idCardStopsAfterFrontUntilUserAllowsBackSide() {
+        var vmRef: AppViewModel? = null
+        compose.activityRule.scenario.onActivity { vmRef = ViewModelProvider(it)[AppViewModel::class.java] }
+        val vm = vmRef!!
+        compose.runOnUiThread { vm.updateSettings(vm.settings.copy(autoCapture = false)) }
+        compose.onNodeWithText("ID Card Scan").performClick()
+        compose.waitUntil(15_000) { vm.idCardCaptureStage == 1 }
+        Thread.sleep(2000)
+        shot("17_ui_id_front_stage")
+
+        val front = File(TestSupport.ctx.cacheDir, "ui_front.jpg")
+        TestSupport.saveJpegFile(TestSupport.cardScene(0).bitmap, front, 95)
+        compose.runOnUiThread { vm.onPhotoCaptured(front) }
+        compose.waitUntil(90_000) { vm.idCardAwaitingBack }
+        compose.waitForIdle()
+        compose.onNodeWithText("Front side captured", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Scan back side").assertIsDisplayed()
+        shot("18_ui_id_after_front_waiting")
+
+        // nothing may happen on its own while the user is flipping the card
+        Thread.sleep(8000)
+        assertTrue("must still be waiting", vm.idCardAwaitingBack)
+        assertEquals("no page may be created yet", 0, vm.pages.size)
+        assertEquals(2, vm.idCardCaptureStage)
+
+        compose.onNodeWithText("Scan back side").performClick()
+        compose.waitForIdle()
+        assertTrue("waiting flag must clear after the tap", !vm.idCardAwaitingBack)
+        compose.onNodeWithText("BACK SIDE (2 OF 2)", substring = true).assertIsDisplayed()
+        shot("19_ui_id_back_stage")
+
+        val back = File(TestSupport.ctx.cacheDir, "ui_back.jpg")
+        TestSupport.saveJpegFile(TestSupport.cardScene(1).bitmap, back, 95)
+        compose.runOnUiThread { vm.onPhotoCaptured(back) }
+        compose.waitUntil(90_000) { vm.pages.size == 1 && vm.busy == null }
+        compose.waitForIdle()
+        shot("20_ui_id_result_edit")
+        log("ID flow through the real screens: stopped after front, resumed on tap, A4 page created (pages=${vm.pages.size})")
     }
 }
