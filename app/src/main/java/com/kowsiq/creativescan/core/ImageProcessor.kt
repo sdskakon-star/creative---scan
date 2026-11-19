@@ -555,7 +555,14 @@ object ImageProcessor {
         rgb.release()
         val norm = normalizeLuminance(gray, 0.9, ca, cb)
         gray.release(); ca.release(); cb.release()
-        val eq = clahe(norm, 1.3)
+        // Levels instead of CLAHE: CLAHE amplified soft stains into grey blotches. Paper goes to clean white,
+        // soft shadows (well above ink level) are lifted, dark ink and strokes keep their depth.
+        val lut = Mat(1, 256, CvType.CV_8U)
+        for (i in 0..255) {
+            val t = ((i - 25.0) / (195.0 - 25.0)).coerceIn(0.0, 1.0)
+            lut.put(0, i, byteArrayOf((255.0 * t).roundToInt().coerceIn(0, 255).toByte()))
+        }
+        val eq = Mat(); Core.LUT(norm, lut, eq); lut.release()
         norm.release()
         val out = Mat()
         Imgproc.cvtColor(eq, out, Imgproc.COLOR_GRAY2RGB)
