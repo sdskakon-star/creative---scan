@@ -1,0 +1,51 @@
+s01_baseline detected=true shadowy=false area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s01_baseline sharpness=3.08
+s01_baseline time_ms=5305
+s02_tilt detected=true shadowy=false area=0.4903604166666667 corners=0.2317,0.2150;0.9000,0.1363;0.8217,0.9325;0.0933,0.8175
+s02_tilt sharpness=3.07
+s02_tilt time_ms=5201
+s03_rotated detected=true shadowy=false area=0.5361760416666667 corners=0.1817,0.1075;0.9100,0.1737;0.8000,0.9000;0.0650,0.8250
+s03_rotated sharpness=3.09
+s03_rotated time_ms=5130
+s04_shadow_diag detected=true shadowy=true area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s04_shadow_diag sharpness=2.94
+s04_shadow_diag time_ms=4913
+s05_shadow_hand detected=true shadowy=true area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s05_shadow_hand sharpness=4.20
+s05_shadow_hand time_ms=5197
+s06_fold_cross detected=true shadowy=false area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s06_fold_cross sharpness=3.07
+s06_fold_cross time_ms=5146
+s07_letter_fold_shadow detected=true shadowy=true area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s07_letter_fold_shadow sharpness=3.14
+s07_letter_fold_shadow time_ms=5534
+s08_lowlight detected=true shadowy=false area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s08_lowlight sharpness=3.15
+s08_lowlight time_ms=5452
+s09_warm_cast detected=true shadowy=false area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s09_warm_cast sharpness=3.10
+s09_warm_cast time_ms=5278
+s10_blur detected=true shadowy=false area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s10_blur sharpness=1.98
+s10_blur time_ms=5097
+s11_curl detected=true shadowy=false area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s11_curl sharpness=2.99
+s11_curl time_ms=5143
+s12_crumpled detected=true shadowy=false area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s12_crumpled sharpness=3.18
+s12_crumpled time_ms=5112
+s13_glare detected=true shadowy=false area=0.5550083333333333 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8662;0.1183,0.8788
+s13_glare sharpness=3.01
+s13_glare time_ms=5201
+s14_flyer_fold detected=true shadowy=true area=0.5559427083333334 corners=0.1367,0.1363;0.8667,0.1238;0.8833,0.8675;0.1183,0.8800
+s14_flyer_fold sharpness=2.38
+s14_flyer_fold time_ms=5313
+u01_leaflet detected=true shadowy=true area=0.513385579937304 corners=0.0000,0.0000;1.0000,0.0000;1.0000,1.0000;0.0000,1.0000
+u01_leaflet sharpness=2.56
+u01_leaflet time_ms=3906
+u02_table detected=true shadowy=true area=0.9680040983606557 corners=0.0040,0.0040;0.9960,0.0040;0.9960,0.9960;0.0040,0.9960
+u02_table sharpness=4.15
+u02_table time_ms=11793
+u03_edgesliver detected=true shadowy=true area=0.8801376936316695 corners=0.0040,0.0040;0.9960,0.0040;0.9960,0.9960;0.0040,0.9960
+u03_edgesliver sharpness=4.42
+u03_edgesliver time_ms=11598

@@ -1,0 +1,11 @@
+
+com.kowsiq.creativescan.AppFlowTest:..
+com.kowsiq.creativescan.ManyPagesTest:.
+com.kowsiq.creativescan.PipelineTest:......
+com.kowsiq.creativescan.QualityRunTest:.
+
+Time: 266.197
+
+OK (10 tests)
+
+

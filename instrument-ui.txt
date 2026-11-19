@@ -1,0 +1,8 @@
+
+com.kowsiq.creativescan.UiSmokeTest:...
+
+Time: 29.77
+
+OK (3 tests)
+
+

@@ -1,0 +1,32 @@
+--------- beginning of main
+11-19 10:10:30.819  2937  3522 I CSTEST  : ID A4 content bounds=[490, 697, 1165, 1642] margins L=490 R=489 T=697 B=697 size=675x945 expected=674.0x944.0589
+11-19 10:10:30.830  2937  3522 I CSTEST  : front stamp colour on A4 = [203, 26, 36]
+11-19 10:10:33.042  2937  3522 I CSTEST  : regular page auto-corners maxErr=0.0016666651
+11-19 10:10:38.596  2937  3522 I CSTEST  : PDF page 1 = 595x841 pt
+11-19 10:10:39.041  2937  3522 I CSTEST  : PDF page 1 content bounds=[351, 500, 838, 1181] centring offsets dx=1 dy=1 (px at 2x)
+11-19 10:10:39.046  2937  3522 I CSTEST  : PDF page 2 = 841x595 pt
+11-19 10:10:39.161  2937  3522 I CSTEST  : PDF page 2 ink fraction=0.05799018775167618
+11-19 10:10:43.086  2937  3522 I CSTEST  : JPEG 1: 1654x2339
+11-19 10:10:43.108  2937  3522 I CSTEST  : JPEG 2: 920x817
+11-19 10:10:43.122  2937  3522 I CSTEST  : listed documents: [CSTEST_doc.pdf, CSTEST_doc_page1.jpg, CSTEST_doc_page2.jpg]
+11-19 10:10:43.577  2937  3522 I CSTEST  : blank card rejection message: Could not detect all four card edges. Place the card flat on a darker, plain surface and try again.
+11-19 10:12:56.184  2937  3522 I CSTEST  : 30 pages of 12 MP: capture total 49584 ms, PDF export 82432 ms, java heap peak ~31 MB of max 576 MB, PDF listed=true
+11-19 10:12:56.298  2937  3522 I CSTEST  : paper detection: live maxErr=0.0027777702 post maxErr=0.0016666651 area=0.38762708333333334 shadowy=true
+11-19 10:12:56.797  2937  3522 I CSTEST  : card 0 detection maxErr=0.0016666651
+11-19 10:12:56.823  2937  3522 I CSTEST  : card 0 rectified 887x560 aspect=1.5839285714285714 (target 1.585772508336421)
+11-19 10:12:56.824  2937  3522 I CSTEST  : card 0 stamp colour after card processing = [203, 26, 36]
+11-19 10:12:56.891  2937  3522 I CSTEST  : card 1 detection maxErr=0.0016666651
+11-19 10:12:56.924  2937  3522 I CSTEST  : card 1 rectified 966x609 aspect=1.5862068965517242 (target 1.585772508336421)
+11-19 10:12:56.925  2937  3522 I CSTEST  : card 1 stamp colour after card processing = [203, 26, 36]
+11-19 10:12:57.631  2937  3522 I CSTEST  : B&W extreme fraction=1.0
+11-19 10:13:08.495  2937  3522 I CSTEST  : 3 full-size renders of a 12 MP image took 10839 ms
+11-19 10:13:08.789  2937  3522 I CSTEST  : ORIGINAL 919x816 paper levels=[231, 199, 212, 177]
+11-19 10:13:09.076  2937  3522 I CSTEST  : ORIGINAL 919x816 paper levels=[234, 202, 214, 181] spread=53 ink=0.0972
+11-19 10:13:09.800  2937  3522 I CSTEST  : ENHANCED 919x816 paper levels=[255, 255, 255, 255] spread=0 ink=0.0843
+11-19 10:13:10.495  2937  3522 I CSTEST  : GRAYSCALE 919x816 paper levels=[255, 255, 255, 255] spread=0 ink=0.0795
+11-19 10:13:11.223  2937  3522 I CSTEST  : BLACK_WHITE 919x816 paper levels=[255, 255, 255, 255] spread=0 ink=0.1179
+11-19 10:13:11.960  2937  3522 I CSTEST  : DOCUMENT_CLEAN 919x816 paper levels=[255, 255, 255, 255] spread=0 ink=0.0990
+11-19 10:13:12.288  2937  3522 I CSTEST  : PHOTO 919x816 paper levels=[229, 201, 212, 188] spread=41 ink=0.0986
+11-19 10:15:14.151  5956  5975 I CSTEST  : ID flow through the real screens: stopped after front, resumed on tap, A4 page created (pages=1)
+11-19 10:15:19.071  5956  5975 I CSTEST  : camera (ID mode) activity state=RESUMED
+11-19 10:15:23.819  5956  5975 I CSTEST  : camera (document mode) activity state=RESUMED
