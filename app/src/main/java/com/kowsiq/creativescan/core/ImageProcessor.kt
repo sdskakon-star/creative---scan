@@ -426,7 +426,7 @@ object ImageProcessor {
                 src, dst, transform, Size(outW.toDouble(), outH.toDouble()),
                 Imgproc.INTER_CUBIC, Core.BORDER_REPLICATE
             )
-            return dst
+            return if (!fullFrame && targetAspectRatio == null) trimDeskStrips(dst) else dst
         } catch (e: Exception) {
             dst.release()
             throw e
@@ -435,6 +435,41 @@ object ImageProcessor {
             to.release()
             transform.release()
         }
+    }
+
+    /**
+     * If the detected quad still includes a strip of dark desk along a side (the whole side, edge to edge,
+     * much darker than the paper), crop it off. A printed bar never spans the full page height/width, so
+     * only real desk strips match. Returns [m] itself when nothing has to be cut.
+     */
+    private fun trimDeskStrips(m: Mat): Mat {
+        val g = Mat(); Imgproc.cvtColor(m, g, Imgproc.COLOR_RGB2GRAY)
+        val w = g.cols(); val h = g.rows()
+        val small = Mat(); Imgproc.resize(g, small, Size(), 0.25, 0.25, Imgproc.INTER_AREA); g.release()
+        val sw = small.cols(); val sh = small.rows()
+        val buf = ByteArray(sw * sh); small.get(0, 0, buf); small.release()
+        fun v(x: Int, y: Int) = buf[y * sw + x].toInt() and 255
+        val all = FloatArray(sw * sh) { (buf[it].toInt() and 255).toFloat() }
+        val paper = percentile(all, 0.6)
+        fun colMed(x: Int): Float {
+            val a = FloatArray(sh - 2 * (sh / 10)) { v(x, it + sh / 10).toFloat() }; a.sort(); return a[a.size / 2]
+        }
+        fun rowMed(y: Int): Float {
+            val a = FloatArray(sw - 2 * (sw / 10)) { v(it + sw / 10, y).toFloat() }; a.sort(); return a[a.size / 2]
+        }
+        val lim = 0.6f * paper
+        val maxX = (sw * 0.08).toInt(); val maxY = (sh * 0.08).toInt()
+        var l = 0; while (l < maxX && colMed(l) < lim) l++
+        var r = 0; while (r < maxX && colMed(sw - 1 - r) < lim) r++
+        var t = 0; while (t < maxY && rowMed(t) < lim) t++
+        var b = 0; while (b < maxY && rowMed(sh - 1 - b) < lim) b++
+        if (l + r + t + b == 0) return m
+        fun px(n: Int, k: Int) = if (n == 0) 0 else n * 4 + k
+        val x0 = px(l, 4); val x1 = w - px(r, 4); val y0 = px(t, 4); val y1 = h - px(b, 4)
+        if (x1 - x0 < w / 2 || y1 - y0 < h / 2) return m
+        val out = Mat(m, org.opencv.core.Rect(x0, y0, x1 - x0, y1 - y0)).clone()
+        m.release()
+        return out
     }
 
     private fun dist(a: Point, b: Point): Double {
@@ -649,7 +684,18 @@ object ImageProcessor {
         val dist = Mat(ls.rows(), ls.cols(), CvType.CV_32F); dist.put(0, 0, d)
         aS.release(); bS.release()
         val bgF = FloatArray(n); bg0.get(0, 0, bgF)
-        return PageModel(f, ls, bg0, dist, percentile(bgF, 0.95))
+        val p95 = percentile(bgF, 0.95)
+        // Soft dark blobs on plain paper (finger/phone shadows, stains) are wider than the 25 px closing:
+        // a larger closing lifts them, but only on neutral, still fairly bright paper and by a limited amount.
+        val big = Mat(); Imgproc.morphologyEx(ls, big, Imgproc.MORPH_CLOSE, Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(61.0, 61.0)))
+        big.convertTo(big, CvType.CV_32F); Imgproc.GaussianBlur(big, big, Size(), 3.0)
+        val bigF = FloatArray(n); big.get(0, 0, bigF); big.release()
+        var lifted = false
+        for (i in 0 until n) if (d[i] < 7f && bgF[i] > 0.5f * p95 && bigF[i] > bgF[i] + 2f) {
+            bgF[i] = min(bigF[i], bgF[i] + 70f); lifted = true
+        }
+        if (lifted) bg0.put(0, 0, bgF)
+        return PageModel(f, ls, bg0, dist, p95)
     }
 
     /**
@@ -665,13 +711,13 @@ object ImageProcessor {
         val lim = 0.5f * percentile(lv, 0.95)
         val paper = BooleanArray(n) { dF[it] < 7f && lv[it] > lim }
 
-        fun gains(len: Int, other: Int, at: (Int, Int) -> Int): FloatArray {
+        fun gainsPart(len: Int, other: Int, j0: Int, j1: Int, at: (Int, Int) -> Int): FloatArray {
             val prof = FloatArray(len) { Float.NaN }
-            val tmp = FloatArray(other)
+            val tmp = FloatArray(j1 - j0)
             for (i in 0 until len) {
                 var c = 0
-                for (j in 0 until other) { val k = at(i, j); if (paper[k]) tmp[c++] = lv[k] }
-                if (c >= max(3, (0.06 * other).toInt())) { val sub = tmp.copyOf(c); sub.sort(); prof[i] = sub[c / 2] }
+                for (j in j0 until j1) { val k = at(i, j); if (paper[k]) tmp[c++] = lv[k] }
+                if (c >= max(3, (0.06 * (j1 - j0)).toInt())) { val sub = tmp.copyOf(c); sub.sort(); prof[i] = sub[c / 2] }
             }
             var first = -1
             for (i in 0 until len) if (!prof[i].isNaN()) { first = i; break }
@@ -699,6 +745,13 @@ object ImageProcessor {
             }
             g = smooth(smooth(g))
             return g
+        }
+        // A real fold crosses the whole page, so its dip must show in EVERY quarter of the row/column;
+        // dips caused by text rows or table lines only appear in some of them. Gain = smallest quarter gain.
+        fun gains(len: Int, other: Int, at: (Int, Int) -> Int): FloatArray {
+            val parts = 4
+            val per = (0 until parts).map { q -> gainsPart(len, other, q * other / parts, (q + 1) * other / parts, at) }
+            return FloatArray(len) { i -> per.minOf { it[i] } }
         }
         val gy = gains(h, w) { i, j -> i * w + j }
         val gx = gains(w, h) { i, j -> j * w + i }
