@@ -463,13 +463,62 @@ object ImageProcessor {
         var r = 0; while (r < maxX && colMed(sw - 1 - r) < lim) r++
         var t = 0; while (t < maxY && rowMed(t) < lim) t++
         var b = 0; while (b < maxY && rowMed(sh - 1 - b) < lim) b++
-        if (l + r + t + b == 0) return m
+        if (l + r + t + b == 0) { cleanEdgeBands(m); return m }
         fun px(n: Int, k: Int) = if (n == 0) 0 else n * 4 + k
         val x0 = px(l, 4); val x1 = w - px(r, 4); val y0 = px(t, 4); val y1 = h - px(b, 4)
-        if (x1 - x0 < w / 2 || y1 - y0 < h / 2) return m
+        if (x1 - x0 < w / 2 || y1 - y0 < h / 2) { cleanEdgeBands(m); return m }
         val out = Mat(m, org.opencv.core.Rect(x0, y0, x1 - x0, y1 - y0)).clone()
         m.release()
+        cleanEdgeBands(out)
         return out
+    }
+
+    /**
+     * Partial desk/hand slivers along a page edge (a wavy page edge lets a thin dark, often striped band into only
+     * part of one side). Per row (left/right) or column (top/bottom), a dark run starting at the border and up to
+     * ~3.5% of the page is painted over with the first paper pixel behind it. If more than half of a side's lines are
+     * "dark" it is a printed bar or a whole-side strip, so that side is left untouched.
+     */
+    private fun cleanEdgeBands(m: Mat) {
+        val w = m.cols(); val h = m.rows()
+        val data = ByteArray(w * h * 3); m.get(0, 0, data)
+        fun luma(i: Int): Int {
+            val r = data[i].toInt() and 255; val g = data[i + 1].toInt() and 255; val b = data[i + 2].toInt() and 255
+            return (r * 77 + g * 150 + b * 29) shr 8
+        }
+        fun side(lines: Int, depthMax: Int, refFrom: Int, refTo: Int, idx: (Int, Int) -> Int) {
+            val runs = IntArray(lines)
+            var hit = 0
+            val ref = IntArray(refTo - refFrom)
+            for (ln in 0 until lines) {
+                for (d in refFrom until refTo) ref[d - refFrom] = luma(idx(ln, d))
+                ref.sort(); val paper = ref[ref.size / 2]
+                if (paper < 90) continue
+                val lim = 0.7 * paper
+                var d = 0; var last = -1; var gap = 0
+                while (d < depthMax) {
+                    if (luma(idx(ln, d)) < lim) { last = d; gap = 0 } else { gap++; if (gap > 4) break }
+                    d++
+                }
+                if (last >= 2) { runs[ln] = last + 1; hit++ }
+            }
+            if (hit == 0 || hit > lines / 2) return
+            for (ln in 0 until lines) {
+                val k = runs[ln]
+                if (k == 0) continue
+                val src = idx(ln, min(k + 2, depthMax + 2))
+                for (d in 0 until min(k + 2, depthMax + 2)) {
+                    val o = idx(ln, d)
+                    data[o] = data[src]; data[o + 1] = data[src + 1]; data[o + 2] = data[src + 2]
+                }
+            }
+        }
+        val dx = max(8, (w * 0.035).toInt()); val dy = max(8, (h * 0.035).toInt())
+        side(h, dx, (w * 0.06).toInt(), (w * 0.16).toInt()) { ln, d -> (ln * w + d) * 3 }
+        side(h, dx, (w * 0.84).toInt(), (w * 0.94).toInt()) { ln, d -> (ln * w + (w - 1 - d)) * 3 }
+        side(w, dy, (h * 0.06).toInt(), (h * 0.16).toInt()) { ln, d -> (d * w + ln) * 3 }
+        side(w, dy, (h * 0.84).toInt(), (h * 0.94).toInt()) { ln, d -> ((h - 1 - d) * w + ln) * 3 }
+        m.put(0, 0, data)
     }
 
     private fun dist(a: Point, b: Point): Double {

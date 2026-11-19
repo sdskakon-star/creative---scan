@@ -41,7 +41,7 @@ class QualityRunTest {
             val t0 = System.currentTimeMillis()
             val det = ImageProcessor.analyzeFrame(src, 0.15, true, 800)
             val user = n.startsWith("u")   // real user photos are already cropped: use the full frame
-            val corners = if (user) ImageProcessor.defaultCorners(if (n.startsWith("u02")) 0.004f else 0f) else (det.corners ?: ImageProcessor.defaultCorners(0.02f))
+            val corners = if (user) ImageProcessor.defaultCorners(if ((n.startsWith("u02") || n.startsWith("u03"))) 0.004f else 0f) else (det.corners ?: ImageProcessor.defaultCorners(0.02f))
             report.appendText("$n detected=${det.corners != null} shadowy=${det.shadowy} area=${det.areaFraction} corners=${corners.joinToString(";") { "%.4f,%.4f".format(it.x, it.y) }}\n")
             val sharp = ImageProcessor.sharpnessScore(src, corners)
             report.appendText("$n sharpness=${"%.2f".format(sharp)}\n")
